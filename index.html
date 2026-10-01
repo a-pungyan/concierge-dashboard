@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Concierge Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">CD</span>
+      <div>
+        <div class="brand-name">Concierge Dashboard</div>
+        <div class="brand-sub" id="property-name">The Harbourview · Prototype (fictional data)</div>
+      </div>
+    </div>
+    <form class="global-search" role="search" id="global-search-form">
+      <label for="global-search" class="sr-only">Search everything</label>
+      <input id="global-search" type="search" placeholder="Search units, names, notes, links…  ( / )" autocomplete="off">
+    </form>
+    <button class="btn btn-ghost" id="data-btn" type="button">Data</button>
+  </header>
+
+  <nav class="tabs" aria-label="Main">
+    <a href="#overview" data-view="overview">Overview</a>
+    <a href="#logs" data-view="logs">Shift Log</a>
+    <a href="#followups" data-view="followups">Follow-ups</a>
+    <a href="#resources" data-view="resources">Resources</a>
+  </nav>
+
+  <main id="main" tabindex="-1"></main>
+
+  <div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
+
+  <!-- Shift log dialog -->
+  <dialog id="log-dialog" aria-labelledby="log-dialog-title">
+    <form id="log-form" method="dialog" novalidate>
+      <h2 id="log-dialog-title">New shift log</h2>
+      <input type="hidden" name="id">
+      <div class="grid-2">
+        <label>Date<input type="date" name="date" required></label>
+        <label>Shift
+          <select name="shift">
+            <option>Morning</option><option>Afternoon</option><option>Overnight</option>
+          </select>
+        </label>
+        <label>Unit or name<input name="unit" required placeholder="e.g. 1204 or J. Rivera" autocomplete="off"></label>
+        <label>Category<select name="category" data-options="categories"></select></label>
+      </div>
+      <label>Action taken<textarea name="actionTaken" rows="3" required placeholder="What happened and what you did"></textarea></label>
+      <label>Pending action<textarea name="pendingAction" rows="2" placeholder="Leave blank if nothing is pending"></textarea></label>
+
+      <fieldset class="followup-inline" id="log-followup-fields">
+        <legend>
+          <label class="check"><input type="checkbox" name="makeFollowup"> Create a follow-up from the pending action</label>
+        </legend>
+        <div class="grid-3">
+          <label>Owner<select name="fuOwner" data-options="teams"></select></label>
+          <label>Due date<input type="date" name="fuDue"></label>
+          <label>Priority<select name="fuPriority" data-options="priorities"></select></label>
+        </div>
+      </fieldset>
+
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger-ghost" data-action="delete" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save log</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Follow-up dialog -->
+  <dialog id="fu-dialog" aria-labelledby="fu-dialog-title">
+    <form id="fu-form" method="dialog" novalidate>
+      <h2 id="fu-dialog-title">New follow-up</h2>
+      <input type="hidden" name="id">
+      <label>Task / follow-up<input name="title" required placeholder="e.g. Confirm plumber visit for leak" autocomplete="off"></label>
+      <div class="grid-2">
+        <label>Unit or name<input name="unit" placeholder="e.g. 807" autocomplete="off"></label>
+        <label>Category<select name="category" data-options="categories"></select></label>
+        <label>Owner<select name="owner" data-options="teams"></select></label>
+        <label>Assigned to (optional)<input name="assignee" placeholder="Person's name" autocomplete="off"></label>
+        <label>Due date<input type="date" name="dueDate" required></label>
+        <label>Priority<select name="priority" data-options="priorities"></select></label>
+        <label>Status<select name="status" data-options="statuses"></select></label>
+      </div>
+      <label>Next action<textarea name="nextAction" rows="2" placeholder="What needs to happen next"></textarea></label>
+      <label>Resolution<textarea name="resolution" rows="2" placeholder="How it was resolved (required when marking Done)"></textarea></label>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger-ghost" data-action="delete" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save follow-up</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Resource dialog -->
+  <dialog id="res-dialog" aria-labelledby="res-dialog-title">
+    <form id="res-form" method="dialog" novalidate>
+      <h2 id="res-dialog-title">New resource</h2>
+      <input type="hidden" name="id">
+      <label>Name<input name="name" required autocomplete="off"></label>
+      <label>Link (URL) or contact info<input name="url" required placeholder="https://… or phone / email"></label>
+      <div class="grid-2">
+        <label>Group<select name="group" data-options="resourceGroups"></select></label>
+        <label>Tags<input name="tags" placeholder="comma separated" autocomplete="off"></label>
+      </div>
+      <label>Tips &amp; notes<textarea name="notes" rows="3" placeholder="When to use it, shortcuts, gotchas"></textarea></label>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger-ghost" data-action="delete" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save resource</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Shift note dialog -->
+  <dialog id="note-dialog" aria-labelledby="note-dialog-title" class="wide">
+    <div class="dialog-body">
+      <h2 id="note-dialog-title">Shift note</h2>
+      <div class="grid-2">
+        <label>Date<input type="date" id="note-date"></label>
+        <label>Shift
+          <select id="note-shift"><option value="">All shifts</option><option>Morning</option><option>Afternoon</option><option>Overnight</option></select>
+        </label>
+      </div>
+      <label for="note-text">Generated note (editable)</label>
+      <textarea id="note-text" rows="18" class="mono"></textarea>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Close</button>
+        <button type="button" class="btn btn-primary" id="note-copy">Copy to clipboard</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Data dialog -->
+  <dialog id="data-dialog" aria-labelledby="data-dialog-title">
+    <div class="dialog-body">
+      <h2 id="data-dialog-title">Data &amp; storage</h2>
+      <p class="muted">Records are saved in this browser only (single-user prototype). Use fictional data only.</p>
+      <p id="data-stats" class="muted"></p>
+      <div class="stack">
+        <button type="button" class="btn" id="export-btn">Export backup (JSON)</button>
+        <label class="btn file-btn">Import backup…<input type="file" id="import-file" accept="application/json,.json" class="sr-only"></label>
+        <button type="button" class="btn" id="seed-btn">Reset to sample data</button>
+        <button type="button" class="btn" id="perf-btn">Add 500 test records (performance check)</button>
+        <button type="button" class="btn btn-danger-ghost" id="clear-btn">Delete all records…</button>
+      </div>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Confirm dialog -->
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title">
+    <div class="dialog-body">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-msg"></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
