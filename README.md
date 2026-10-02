@@ -14,13 +14,15 @@ Open `index.html` in a browser. It needs no build step and no server, and it has
 - **Resources:** links to work systems, SharePoint trackers, SOPs, guides and contacts, with tips and tags. Pin a resource to show it on the Overview.
 - **Search and filters:** global search covers everything. Each tab also has its own filters (unit or keyword, date range, category, owner, status, priority).
 - **Generate shift note:** builds a handover note from the shift's logs and open follow-ups, grouped by team, ready to copy into an email or Teams. This is the main lever for the PRD's 30% shift note time goal.
-- **Data:** export or import a JSON backup, reset to sample data, or add 500 test records to check performance.
+- **Data:** export or import a JSON backup of this browser's follow-ups and resources, reset them to sample data, or add 500 test follow-ups to check performance.
 
 Keyboard shortcuts: `/` search · `L` new shift log · `F` new follow-up · `N` shift note · `Esc` close or clear.
 
 ## Storage and security notes
 
-- Records are saved in this browser's `localStorage`, which suits a single-browser prototype. Shared team use needs a backend and a database (see the PRD's out-of-scope list).
+- Shift logs and notices are saved in Supabase (`shift_logs` and `notices` tables), shared by everyone who signs in. Resident suggestions come from the `occupant_report` table.
+- Follow-ups and resources are still saved in this browser's `localStorage`.
+- Sign-in uses Supabase Auth. Every table needs Row Level Security policies for the `authenticated` role.
 - Saves are atomic. If a save fails, an error appears and whatever was entered stays in the form so you can retry.
 - All sample data is fictional. Replace the placeholder resource links with real ones from the Resources tab. Linked systems still use their own logins.
 - The code contains no passwords or API secrets.

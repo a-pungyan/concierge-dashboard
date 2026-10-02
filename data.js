@@ -61,29 +61,12 @@ function sampleUnit() {
 
 function sampleData() {
   const now = new Date().toISOString();
-  const log = (dOff, shift, unit, category, actionTaken, pendingAction = '') => ({
-    id: uid(), date: dayOffset(dOff), shift, unit, category, actionTaken, pendingAction, createdAt: now, updatedAt: now,
-  });
   const fu = (title, unit, category, owner, dueOff, priority, status, nextAction = '', resolution = '', assignee = '') => ({
     id: uid(), title, unit, category, owner, assignee, dueDate: dayOffset(dueOff), priority, status, nextAction, resolution, createdAt: now, updatedAt: now,
   });
 
   return {
     version: 1,
-    logs: [
-      log(0, 'Morning', '1204', 'Package', 'Oversized package (bike box) received, stored in package room B.', 'Resident to pick up after 5pm.'),
-      log(0, 'Morning', '807', 'Maintenance', 'Resident reported slow leak under kitchen sink. Placed bucket, took photos.', 'Maintenance to inspect today.'),
-      log(0, 'Morning', 'Lobby', 'General', 'Front entrance door closer is slamming. Wedged open briefly during move-in.', ''),
-      log(0, 'Morning', '1510', 'Amenity booking', 'Party room booked for Saturday 6–10pm. Deposit received.', 'Add to amenity tracker.'),
-      log(-1, 'Overnight', 'P2 garage', 'Security', 'Patrolled P2 after noise report. Found gate stuck open; reset manually.', 'Gate vendor service call.'),
-      log(-1, 'Afternoon', '2103', 'Move in / out', 'Move-in completed. Elevator padded and released at 4:15pm.', ''),
-      log(-1, 'Afternoon', 'M. Okafor', 'Guest / visitor', 'Guest suite inquiry for next weekend. Gave rate sheet.', 'Leasing to confirm availability.'),
-      log(-1, 'Morning', '602', 'Noise / complaint', 'Second complaint about late-night music from 702.', 'PM to send noise letter.'),
-      log(-2, 'Afternoon', '1911', 'Resident request', 'Requested replacement fob (lost). Deactivated old fob.', 'Issue new fob once paid.'),
-      log(-2, 'Morning', '304', 'Leasing', 'Prospective resident tour walk-in, referred to leasing.', ''),
-      log(-3, 'Overnight', 'Lobby', 'Security', 'Unknown person tailgated through the front door at 2:10am. Escorted out.', 'Review camera footage.'),
-      log(-3, 'Afternoon', '1006', 'Package', 'Perishable delivery left at desk; resident notified by phone.', ''),
-    ],
     followups: [
       fu('Inspect leak under kitchen sink', '807', 'Maintenance', 'Maintenance', 0, 'High', 'Open', 'Tech to visit before noon; permission to enter given.'),
       fu('Service call for P2 garage gate', 'P2 garage', 'Security', 'Maintenance', -1, 'High', 'In progress', 'Vendor booked — confirm arrival time.', '', 'D. Singh'),
@@ -96,38 +79,22 @@ function sampleData() {
       fu('Remind resident about bike box pickup', '1204', 'Package', 'Concierge', 1, 'Low', 'Open', 'Call if not picked up by tomorrow.'),
       fu('Replace hallway light on 14th floor', '14th floor', 'Maintenance', 'Maintenance', -4, 'Low', 'Done', '', 'Bulb replaced by maintenance.'),
     ],
-    notices: [
-      { id: uid(), text: 'Fire alarm testing Thursday 10am–2pm. Post notice in elevators.', date: dayOffset(0) },
-      { id: uid(), text: 'Water shut-off floors 10–14 on ' + dayOffset(3) + ', 9–11am.', date: dayOffset(0) },
-    ],
     resources: sampleResources(),
   };
 }
 
-/* Generates bulk fictional records for the 500-record performance target. */
-function bulkTestRecords(count) {
+/* Generates bulk fictional follow-ups for the 500-record performance target. */
+function bulkTestFollowups(count) {
   const now = new Date().toISOString();
-  const logs = [];
-  const followups = [];
   const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  for (let i = 0; i < count; i++) {
+  return Array.from({ length: count }, (_, i) => {
     const unit = Math.random() < 0.8 ? sampleUnit() : pick(SAMPLE_NAMES);
     const category = pick(OPTIONS.categories);
-    if (i % 2 === 0) {
-      logs.push({
-        id: uid(), date: dayOffset(-Math.floor(Math.random() * 60)), shift: pick(OPTIONS.shifts), unit, category,
-        actionTaken: `Test record #${i + 1}: ${category.toLowerCase()} handled for ${unit}.`,
-        pendingAction: Math.random() < 0.3 ? 'Follow up next shift.' : '',
-        createdAt: now, updatedAt: now,
-      });
-    } else {
-      followups.push({
-        id: uid(), title: `Test follow-up #${i + 1} (${category})`, unit, category, owner: pick(OPTIONS.teams), assignee: '',
-        dueDate: dayOffset(Math.floor(Math.random() * 40) - 20), priority: pick(OPTIONS.priorities), status: pick(OPTIONS.statuses),
-        nextAction: 'Test next action.', resolution: '', createdAt: now, updatedAt: now,
-      });
-    }
-  }
-  followups.forEach((f) => { if (f.status === 'Done') f.resolution = 'Resolved (test).'; });
-  return { logs, followups };
+    const status = pick(OPTIONS.statuses);
+    return {
+      id: uid(), title: `Test follow-up #${i + 1} (${category})`, unit, category, owner: pick(OPTIONS.teams), assignee: '',
+      dueDate: dayOffset(Math.floor(Math.random() * 40) - 20), priority: pick(OPTIONS.priorities), status,
+      nextAction: 'Test next action.', resolution: status === 'Done' ? 'Resolved (test).' : '', createdAt: now, updatedAt: now,
+    };
+  });
 }

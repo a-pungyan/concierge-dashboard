@@ -149,14 +149,14 @@
   <dialog id="data-dialog" aria-labelledby="data-dialog-title">
     <div class="dialog-body">
       <h2 id="data-dialog-title">Data &amp; storage</h2>
-      <p class="muted">Records are saved in this browser only (single-user prototype). Use fictional data only.</p>
+      <p class="muted">Shift logs and notices are saved in the shared Supabase database. Follow-ups and resources are saved in this browser only.</p>
       <p id="data-stats" class="muted"></p>
       <div class="stack">
         <button type="button" class="btn" id="export-btn">Export backup (JSON)</button>
         <label class="btn file-btn">Import backup…<input type="file" id="import-file" accept="application/json,.json" class="sr-only"></label>
-        <button type="button" class="btn" id="seed-btn">Reset to sample data</button>
-        <button type="button" class="btn" id="perf-btn">Add 500 test records (performance check)</button>
-        <button type="button" class="btn btn-danger-ghost" id="clear-btn">Delete all records…</button>
+        <button type="button" class="btn" id="seed-btn">Reset follow-ups &amp; resources to sample data</button>
+        <button type="button" class="btn" id="perf-btn">Add 500 test follow-ups (performance check)</button>
+        <button type="button" class="btn btn-danger-ghost" id="clear-btn">Delete follow-ups &amp; resources in this browser…</button>
       </div>
       <p class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">

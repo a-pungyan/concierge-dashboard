@@ -13,17 +13,23 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 /* ---------- Storage ---------- */
 
-let state = loadState();
+/* Follow-ups and resources are saved in this browser. Shift logs and notices live in
+   Supabase (shared by the team): they are held in state.logs / state.notices while
+   signed in, but never written to browser storage. */
 
 function normalize(d) {
   return {
     version: 1,
-    logs: Array.isArray(d.logs) ? d.logs : [],
+    logs: [],
     followups: Array.isArray(d.followups) ? d.followups : [],
-    notices: Array.isArray(d.notices) ? d.notices : [],
+    notices: [],
     resources: Array.isArray(d.resources) ? d.resources : [],
   };
 }
+
+const localPart = (s) => ({ version: 1, followups: s.followups, resources: s.resources });
+
+let state = loadState();
 
 function loadState() {
   let raw = null;
@@ -31,19 +37,25 @@ function loadState() {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch (e) {
     queueMicrotask(() => toast('Browser storage is unavailable. Changes will not be saved after you close this tab.', 'error'));
-    return sampleData();
+    return normalize(sampleData());
   }
   if (raw) {
     try {
-      return normalize(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      const loaded = normalize(parsed);
+      // Older versions kept (sample) shift logs and notices here; drop them.
+      if ('logs' in parsed || 'notices' in parsed) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(loaded))); } catch (_) { /* ignore */ }
+      }
+      return loaded;
     } catch (e) {
       // Keep the unreadable data rather than overwriting it.
       try { localStorage.setItem(STORAGE_KEY + ':unreadable-backup', raw); } catch (_) { /* ignore */ }
       queueMicrotask(() => toast('Saved data could not be read. A backup copy was kept; sample data loaded.', 'error'));
     }
   }
-  const seeded = sampleData();
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); } catch (_) { /* reported on first save */ }
+  const seeded = normalize(sampleData());
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(seeded))); } catch (_) { /* reported on first save */ }
   return seeded;
 }
 
@@ -53,7 +65,7 @@ function commit(mutator) {
   const next = structuredClone(state);
   mutator(next);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(next)));
   } catch (e) {
     const full = e && (e.name === 'QuotaExceededError' || e.code === 22);
     return { ok: false, error: full ? 'Browser storage is full — export a backup and remove old records.' : 'Could not save to browser storage.' };
@@ -61,6 +73,97 @@ function commit(mutator) {
   state = next;
   render();
   return { ok: true };
+}
+
+/* ---------- Shared database (Supabase: shift_logs, notices) ---------- */
+
+let cloudStatus = 'idle'; // idle | loading | ready | error
+let cloudError = '';
+let lastCloudLoad = 0;
+
+const logFromRow = (r) => ({
+  id: r.id, date: r.date, shift: r.shift, unit: r.unit, category: r.category,
+  actionTaken: r.action_taken, pendingAction: r.pending_action || '',
+  createdAt: r.created_at, updatedAt: r.updated_at,
+});
+const logToRow = (l) => ({
+  date: l.date, shift: l.shift, unit: l.unit, category: l.category,
+  action_taken: l.actionTaken, pending_action: l.pendingAction || null,
+});
+const noticeFromRow = (r) => ({ id: r.id, text: r.text, date: r.date });
+
+function dbErrorMessage(err) {
+  const msg = (err && err.message) || String(err || '');
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) return 'Could not reach the database. Check your connection.';
+  if ((err && err.code === '42501') || /row-level security|permission denied/i.test(msg)) return 'You do not have permission to do that (check the table policies in Supabase).';
+  if (err && err.code === 'PGRST116') return 'That record no longer exists or you do not have permission to change it.';
+  if (/JWT|not authenticated/i.test(msg)) return 'Your session has expired. Sign out and sign in again.';
+  return `Database error: ${msg}`;
+}
+
+/* Runs a Supabase query and returns { ok, data } or { ok: false, error } with a readable message. */
+async function db(query) {
+  if (!sb) return { ok: false, error: 'Sign-in is not set up, so nothing can be saved to the database.' };
+  try {
+    const { data, error } = await query();
+    if (error) throw error;
+    return { ok: true, data };
+  } catch (err) {
+    console.error(err);
+    return { ok: false, error: dbErrorMessage(err) };
+  }
+}
+
+/* Supabase returns at most 1000 rows per request, so page through. */
+async function fetchAll(table) {
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb.from(table).select('*').order('created_at').order('id').range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...data);
+    if (data.length < PAGE) return rows;
+  }
+}
+
+async function loadCloud({ quiet = false } = {}) {
+  if (!sb) return;
+  if (!quiet) { cloudStatus = 'loading'; render(); }
+  try {
+    const [logs, notices] = await Promise.all([fetchAll('shift_logs'), fetchAll('notices')]);
+    state.logs = logs.map(logFromRow);
+    state.notices = notices.map(noticeFromRow);
+    cloudStatus = 'ready';
+    lastCloudLoad = Date.now();
+  } catch (err) {
+    console.error(err);
+    if (quiet) return; // keep showing what we already have
+    cloudStatus = 'error';
+    cloudError = dbErrorMessage(err);
+  }
+  // Don't re-render underneath an open form.
+  if (!document.querySelector('dialog[open]:not(#login-dialog)')) render();
+}
+
+function clearCloud() {
+  state.logs = [];
+  state.notices = [];
+  cloudStatus = 'idle';
+}
+
+function cloudBanner() {
+  if (cloudStatus === 'loading') return '<p class="banner">Loading shared shift logs and notices…</p>';
+  if (cloudStatus === 'error') {
+    return `<div class="banner banner-error" role="alert">Could not load shift logs and notices. ${esc(cloudError)}
+      <button type="button" class="btn btn-sm" data-action="retry-cloud">Try again</button></div>`;
+  }
+  return '';
+}
+
+function setBusy(btn, busy, label) {
+  if (busy) { btn.dataset.label = btn.textContent; btn.textContent = label; }
+  else if (btn.dataset.label) btn.textContent = btn.dataset.label;
+  btn.disabled = busy;
 }
 
 /* ---------- Helpers ---------- */
@@ -138,6 +241,9 @@ function matchesTerms(text, ts) {
 const logText = (l) => [l.unit, l.category, l.shift, l.actionTaken, l.pendingAction, l.date, fmtDate(l.date)].join(' ');
 const fuText = (f) => [f.title, f.unit, f.category, f.owner, f.assignee, f.priority, f.status, f.nextAction, f.resolution, f.dueDate].join(' ');
 const resText = (r) => [r.name, r.group, r.url, r.notes, r.tags].join(' ');
+const occName = (o) => [o.first_name, o.last_name].filter(Boolean).join(' ');
+const occLabel = (o) => [o.unit, occName(o)].filter(Boolean).join(' — ');
+const occText = (o) => [o.unit, o.first_name, o.last_name, o.tenant_category].join(' ');
 
 /* Escapes text and wraps search-term matches in <mark>. */
 function hl(text, ts) {
@@ -164,6 +270,9 @@ function overdueBadge(f) {
 }
 
 /* ---------- UI state ---------- */
+
+/* Residents from Supabase (occupant_report). Kept in memory only, never saved to browser storage. */
+let occupants = [];
 
 const ui = {
   team: '',
@@ -291,6 +400,7 @@ function viewOverview() {
     </button>`;
 
   return `
+    ${cloudBanner()}
     <div class="page-head">
       <div>
         <h1>${greet}</h1>
@@ -382,6 +492,7 @@ function viewLogs() {
   const anyFilter = f.q || f.category || f.shift || f.from || f.to;
 
   return `
+    ${cloudBanner()}
     <div class="page-head">
       <div><h1>Shift log</h1><p class="muted">Unit or name, action taken, pending action, and date.</p></div>
       <div class="actions">
@@ -541,8 +652,9 @@ function viewSearch() {
   const logs = state.logs.filter((l) => matchesTerms(logText(l), ts)).sort(byLogRecent);
   const res = state.resources.filter((r) => matchesTerms(resText(r), ts));
   const notices = state.notices.filter((n) => matchesTerms(n.text, ts));
+  const people = occupants.filter((o) => matchesTerms(occText(o), ts));
   const ms = performance.now() - t0;
-  const total = fus.length + logs.length + res.length + notices.length;
+  const total = people.length + fus.length + logs.length + res.length + notices.length;
   const LIMIT = 50;
 
   return `
@@ -550,6 +662,13 @@ function viewSearch() {
       <div><h1>Search results</h1>
       <p class="muted" aria-live="polite">${total} result${total === 1 ? '' : 's'} for “${esc(ui.searchQ.trim())}” · ${ms.toFixed(0)} ms</p></div>
     </div>
+    ${people.length ? section('Residents', people.length, `<ul class="people">${people.slice(0, LIMIT).map((o) => `
+      <li>
+        <div class="item-main"><strong>${hl(o.unit, ts)}</strong> — ${hl(occName(o), ts)}
+          ${o.tenant_category ? `<span class="muted small">${hl(o.tenant_category, ts)}</span>` : ''}</div>
+        <button type="button" class="btn btn-sm" data-action="new-log-for" data-unit="${esc(occLabel(o))}">+ Log</button>
+        <button type="button" class="btn btn-sm" data-action="new-fu-for" data-unit="${esc(occLabel(o))}">+ Follow-up</button>
+      </li>`).join('')}</ul>${people.length > LIMIT ? `<p class="muted small">Showing first ${LIMIT}. Type more of the unit or name to narrow it down.</p>` : ''}`) : ''}
     ${res.length ? section('Resources', res.length, `<ul class="quick-links">${res.slice(0, LIMIT).map((r) => {
       const url = safeUrl(r.url);
       const ext = url && /^https?:/i.test(url);
@@ -663,7 +782,7 @@ function openLogDialog(log) {
   logForm.elements.unit.focus();
 }
 
-logForm.addEventListener('submit', (e) => {
+logForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   clearInvalid(logForm);
   if (!requireFields(logForm, ['date', 'unit', 'actionTaken'])) return;
@@ -678,33 +797,45 @@ logForm.addEventListener('submit', (e) => {
   const now = new Date().toISOString();
   const rec = {
     date: v.date, shift: v.shift, unit: v.unit.trim(), category: v.category,
-    actionTaken: v.actionTaken.trim(), pendingAction: v.pendingAction.trim(), updatedAt: now,
+    actionTaken: v.actionTaken.trim(), pendingAction: v.pendingAction.trim(),
   };
-  const result = commit((s) => {
-    if (v.id) {
-      const i = s.logs.findIndex((l) => l.id === v.id);
-      if (i >= 0) s.logs[i] = { ...s.logs[i], ...rec };
-    } else {
-      s.logs.push({ id: uid(), createdAt: now, ...rec });
-      if (makeFu) {
-        s.followups.push({
-          id: uid(), title: rec.pendingAction, unit: rec.unit, category: rec.category, owner: v.fuOwner, assignee: '',
-          dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority, status: 'Open', nextAction: '', resolution: '',
-          createdAt: now, updatedAt: now,
-        });
-      }
-    }
-  });
-  if (!result.ok) return showFormError(logForm, `${result.error} Your entry has been kept — try saving again.`);
+  const btn = $('button[type="submit"]', logForm);
+  setBusy(btn, true, 'Saving…');
+  const res = await db(() => (v.id
+    ? sb.from('shift_logs').update({ ...logToRow(rec), updated_at: now }).eq('id', v.id).select().single()
+    : sb.from('shift_logs').insert(logToRow(rec)).select().single()));
+  setBusy(btn, false);
+  if (!res.ok) return showFormError(logForm, `${res.error} Your entry has been kept — try saving again.`);
+
+  const saved = logFromRow(res.data);
+  const i = state.logs.findIndex((l) => l.id === saved.id);
+  if (i >= 0) state.logs[i] = saved; else state.logs.push(saved);
+
+  let fuProblem = '';
+  if (makeFu) {
+    const r = commit((s) => {
+      s.followups.push({
+        id: uid(), title: rec.pendingAction, unit: rec.unit, category: rec.category, owner: v.fuOwner, assignee: '',
+        dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority, status: 'Open', nextAction: '', resolution: '',
+        createdAt: now, updatedAt: now,
+      });
+    });
+    if (!r.ok) fuProblem = r.error;
+  }
+  render();
   logDialog.close();
-  toast(v.id ? 'Shift log updated.' : makeFu ? 'Shift log and follow-up saved.' : 'Shift log saved.');
+  if (fuProblem) toast(`Shift log saved, but the follow-up could not be saved: ${fuProblem}`, 'error');
+  else toast(v.id ? 'Shift log updated.' : makeFu ? 'Shift log and follow-up saved.' : 'Shift log saved.');
 });
 
 $('[data-action="delete"]', logForm).addEventListener('click', async () => {
   const id = logForm.elements.id.value;
-  if (!(await confirmDialog('Delete this shift log entry? This cannot be undone.', 'Delete'))) return;
-  const r = commit((s) => { s.logs = s.logs.filter((l) => l.id !== id); });
-  if (!r.ok) return showFormError(logForm, r.error);
+  if (!(await confirmDialog('Delete this shift log entry for everyone? This cannot be undone.', 'Delete'))) return;
+  const res = await db(() => sb.from('shift_logs').delete().eq('id', id).select());
+  if (res.ok && !res.data.length) res.ok = false, res.error = dbErrorMessage({ code: 'PGRST116' });
+  if (!res.ok) return showFormError(logForm, res.error);
+  state.logs = state.logs.filter((l) => l.id !== id);
+  render();
   logDialog.close();
   toast('Shift log deleted.');
 });
@@ -892,7 +1023,8 @@ function openDataDialog() {
   let bytes = 0;
   try { bytes = (localStorage.getItem(STORAGE_KEY) || '').length; } catch (_) { /* ignore */ }
   $('#data-stats').textContent =
-    `${state.logs.length} shift logs · ${state.followups.length} follow-ups · ${state.resources.length} resources · ${state.notices.length} notices · ~${Math.ceil(bytes / 1024)} KB used`;
+    `Shared database: ${state.logs.length} shift logs · ${state.notices.length} notices. ` +
+    `This browser: ${state.followups.length} follow-ups · ${state.resources.length} resources · ~${Math.ceil(bytes / 1024)} KB used.`;
   showFormError(dataDialog, '');
   dataDialog.showModal();
 }
@@ -918,42 +1050,43 @@ $('#import-file').addEventListener('change', async (e) => {
   let data;
   try {
     data = JSON.parse(await file.text());
-    if (!data || (!Array.isArray(data.logs) && !Array.isArray(data.followups))) throw new Error('shape');
+    if (!data || (!Array.isArray(data.followups) && !Array.isArray(data.resources))) throw new Error('shape');
   } catch (_) {
     return showFormError(dataDialog, 'That file is not a Concierge Dashboard backup.');
   }
   const imported = normalize(data);
-  if (!(await confirmDialog(`Replace all current records with this backup (${imported.logs.length} logs, ${imported.followups.length} follow-ups)?`, 'Replace'))) return;
-  const r = commit((s) => Object.assign(s, imported));
+  if (!(await confirmDialog(`Replace this browser's follow-ups and resources with the backup (${imported.followups.length} follow-ups, ${imported.resources.length} resources)? Shared shift logs and notices are not changed.`, 'Replace'))) return;
+  const r = commit((s) => { s.followups = imported.followups; s.resources = imported.resources; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
   toast('Backup imported.');
 });
 
 $('#seed-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog('Replace all records with the fictional sample data?', 'Reset'))) return;
-  const r = commit((s) => Object.assign(s, sampleData()));
+  if (!(await confirmDialog("Replace this browser's follow-ups and resources with the fictional sample data? Shared shift logs and notices are not changed.", 'Reset'))) return;
+  const sample = sampleData();
+  const r = commit((s) => { s.followups = sample.followups; s.resources = sample.resources; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
   toast('Sample data loaded.');
 });
 
 $('#perf-btn').addEventListener('click', () => {
-  const extra = bulkTestRecords(500);
+  const extra = bulkTestFollowups(500);
   const t0 = performance.now();
-  const r = commit((s) => { s.logs.push(...extra.logs); s.followups.push(...extra.followups); });
+  const r = commit((s) => { s.followups.push(...extra); });
   if (!r.ok) return showFormError(dataDialog, r.error);
   const ms = performance.now() - t0;
   dataDialog.close();
-  toast(`Added 500 test records. Saved and re-rendered in ${ms.toFixed(0)} ms.`);
+  toast(`Added 500 test follow-ups. Saved and re-rendered in ${ms.toFixed(0)} ms.`);
 });
 
 $('#clear-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog('Delete ALL shift logs, follow-ups, notices and resources from this browser? Export a backup first if you need one.', 'Delete everything'))) return;
-  const r = commit((s) => Object.assign(s, { logs: [], followups: [], notices: [], resources: [] }));
+  if (!(await confirmDialog('Delete all follow-ups and resources saved in this browser? Shared shift logs and notices are not affected. Export a backup first if you need one.', 'Delete'))) return;
+  const r = commit((s) => { s.followups = []; s.resources = []; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
-  toast('All records deleted.');
+  toast('Follow-ups and resources deleted from this browser.');
 });
 
 /* ----- Login (Supabase Auth) ----- */
@@ -973,6 +1106,9 @@ function showLogin() {
   document.body.classList.add('signed-out');
   $('#account-email').textContent = '';
   $('#signout-btn').hidden = true;
+  occupants = [];
+  clearCloud();
+  render();
   $('#occupant-list').innerHTML = '';
   $$('dialog[open]').forEach((d) => { if (d !== loginDialog) d.close(); });
   loginForm.reset();
@@ -988,6 +1124,7 @@ function onSignedIn(session) {
   $('#account-email').textContent = session.user.email || '';
   $('#signout-btn').hidden = false;
   loadOccupants();
+  loadCloud();
 }
 
 /* Fills the "Unit or name" suggestions from the occupant_report table.
@@ -1017,6 +1154,8 @@ async function loadOccupants() {
   rows.sort((a, b) =>
     String(a.unit ?? '').localeCompare(String(b.unit ?? ''), undefined, { numeric: true }) ||
     String(a.last_name ?? '').localeCompare(String(b.last_name ?? '')));
+  occupants = rows;
+  if (currentView() === 'search') render();
   $('#occupant-list').innerHTML = rows.map((r) => {
     const name = [r.first_name, r.last_name].filter(Boolean).join(' ');
     const value = [r.unit, name].filter(Boolean).join(' — ');
@@ -1072,6 +1211,14 @@ main.addEventListener('click', (e) => {
   const id = el.dataset.id;
   switch (el.dataset.action) {
     case 'new-log': return openLogDialog();
+    case 'new-log-for':
+      openLogDialog();
+      logForm.elements.unit.value = el.dataset.unit;
+      return logForm.elements.actionTaken.focus();
+    case 'new-fu-for':
+      openFuDialog();
+      fuForm.elements.unit.value = el.dataset.unit;
+      return;
     case 'edit-log': return openLogDialog(state.logs.find((l) => l.id === id));
     case 'new-fu': return openFuDialog();
     case 'edit-fu': return openFuDialog(state.followups.find((f) => f.id === id));
@@ -1093,10 +1240,18 @@ main.addEventListener('click', (e) => {
       return;
     }
     case 'del-notice': {
-      const r = commit((s) => { s.notices = s.notices.filter((n) => n.id !== id); });
-      if (!r.ok) toast(r.error, 'error'); else { toast('Notice dismissed.'); $('#notice-input')?.focus(); }
+      el.disabled = true;
+      db(() => sb.from('notices').delete().eq('id', id).select()).then((res) => {
+        if (res.ok && !res.data.length) res.ok = false, res.error = dbErrorMessage({ code: 'PGRST116' });
+        if (!res.ok) { el.disabled = false; return toast(res.error, 'error'); }
+        state.notices = state.notices.filter((n) => n.id !== id);
+        render();
+        toast('Notice dismissed.');
+        $('#notice-input')?.focus();
+      });
       return;
     }
+    case 'retry-cloud': return loadCloud();
     case 'clear-log-filters':
       ui.logFilters = { q: '', category: '', shift: '', from: '', to: '' };
       return render();
@@ -1139,7 +1294,7 @@ main.addEventListener('input', (e) => {
   render();
 });
 
-main.addEventListener('submit', (e) => {
+main.addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
@@ -1147,8 +1302,14 @@ main.addEventListener('submit', (e) => {
   const input = form.elements.text;
   const text = input.value.trim();
   if (!text) return input.focus();
-  const r = commit((s) => s.notices.push({ id: uid(), text, date: today() }));
-  if (!r.ok) return toast(`${r.error} Your notice was not saved.`, 'error');
+  const btn = $('button[type="submit"]', form);
+  setBusy(btn, true, 'Adding…');
+  const res = await db(() => sb.from('notices').insert({ text, date: today() }).select().single());
+  setBusy(btn, false);
+  // On failure the typed text stays in the box so it can be retried.
+  if (!res.ok) return toast(`${res.error} Your notice was not saved.`, 'error');
+  state.notices.push(noticeFromRow(res.data));
+  render();
   toast('Notice added.');
   $('#notice-input')?.focus();
 });
@@ -1191,6 +1352,13 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'l' || e.key === 'L') { e.preventDefault(); openLogDialog(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); openFuDialog(); }
   else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openNoteDialog(); }
+});
+
+/* Pick up teammates' new logs and notices when coming back to the tab. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && cloudStatus === 'ready' && Date.now() - lastCloudLoad > 60000) {
+    loadCloud({ quiet: true });
+  }
 });
 
 /* ---------- Boot ---------- */
