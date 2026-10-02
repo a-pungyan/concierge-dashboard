@@ -2,13 +2,36 @@
    All names, units and links below are made up. Replace resource links with
    your real systems from the Resources tab (they are stored in this browser). */
 
+/* Shift note template settings. */
+const SHIFT_NOTE = {
+  property: 'Ledbury',
+  signOff: 'Andrea',
+};
+
 const OPTIONS = {
-  categories: ['Package', 'Maintenance', 'Resident request', 'Amenity booking', 'Security', 'Noise / complaint', 'Leasing', 'Move in / out', 'Guest / visitor', 'General'],
+  // The first seven each have their own place in the shift note; the rest go under "Residents and Guests".
+  categories: [
+    'Logs and trackers', 'Vendor / contractor', 'Guest suite', 'Event', 'Resident touchpoint', 'Fitz gift', 'Amenity / common area',
+    'Package', 'Maintenance', 'Resident request', 'Amenity booking', 'Security', 'Noise / complaint', 'Leasing', 'Move in / out', 'Guest / visitor', 'General',
+  ],
   teams: ['Concierge', 'Maintenance', 'Leasing', 'Property Management'],
   priorities: ['High', 'Medium', 'Low'],
   statuses: ['Open', 'In progress', 'Waiting', 'Done'],
   resourceGroups: ['Work systems', 'SharePoint trackers', 'SOPs', 'Guides & tips', 'Contacts'],
   shifts: ['Morning', 'Afternoon', 'Overnight'],
+};
+
+/* Field labels in the shift log form for categories whose fields mean something
+   different in the shift note. Anything not listed uses the default labels. */
+const CATEGORY_HINTS = {
+  default: { unit: 'Unit or name', unitPh: 'Type a unit or resident name', action: 'Action taken', actionPh: 'What happened and what you did', pending: 'Pending action', pendingPh: 'Leave blank if nothing is pending' },
+  'Logs and trackers': { unit: 'Log or tracker', unitPh: 'e.g. Snow Log', action: 'Status', actionPh: 'e.g. No new snowfall was recorded during this shift.' },
+  'Vendor / contractor': { unit: 'Vendor', unitPh: 'e.g. White Rose', action: 'Why they were on site', actionPh: 'e.g. White Rose on site for cleaning.', pending: 'Extra details', pendingPh: 'e.g. Their order has arrived…' },
+  'Guest suite': { unit: 'Booked by', unitPh: 'e.g. E3007 Joshua Graham', action: 'Status / note', actionPh: 'e.g. Previous guest has checked out, kindly ask WR to clean in the morning.' },
+  Event: { unit: 'Event', unitPh: 'e.g. Wine tasting', action: 'Details', actionPh: 'What happened or what is planned' },
+  'Resident touchpoint': { unit: 'Resident', action: 'Touchpoint / outcome', actionPh: 'e.g. Called to check in after move-in.' },
+  'Fitz gift': { unit: 'Resident', action: 'Gift details', actionPh: 'e.g. Welcome gift delivered.' },
+  'Amenity / common area': { unit: 'Location', unitPh: 'e.g. Curb Appeal', action: 'Concern', actionPh: 'e.g. Some litter found in the mews.', pending: 'To-Do', pendingPh: 'e.g. Work order created for remaining.' },
 };
 
 function isoDate(d) {

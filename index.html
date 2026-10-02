@@ -52,6 +52,10 @@
         <label>Unit or name<input name="unit" list="occupant-list" required placeholder="Type a unit or resident name" autocomplete="off"></label>
         <label>Category<select name="category" data-options="categories"></select></label>
       </div>
+      <div class="grid-2" id="guest-suite-fields" hidden>
+        <label>Guest suite<input name="guestSuite" placeholder="e.g. E511" autocomplete="off"></label>
+        <label>Check-in date<input type="date" name="checkIn"></label>
+      </div>
       <label>Action taken<textarea name="actionTaken" rows="3" required placeholder="What happened and what you did"></textarea></label>
       <label>Pending action<textarea name="pendingAction" rows="2" placeholder="Leave blank if nothing is pending"></textarea></label>
 
@@ -135,8 +139,8 @@
           <select id="note-shift"><option value="">All shifts</option><option>Morning</option><option>Afternoon</option><option>Overnight</option></select>
         </label>
       </div>
-      <label for="note-text">Generated note (editable)</label>
-      <textarea id="note-text" rows="18" class="mono"></textarea>
+      <p class="muted small" id="note-label">Generated note — you can edit it here before copying. It pastes into Outlook with the formatting kept.</p>
+      <div id="note-preview" class="note-preview" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="note-label"></div>
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="button" class="btn btn-ghost" data-action="cancel">Close</button>

@@ -84,11 +84,14 @@ let lastCloudLoad = 0;
 const logFromRow = (r) => ({
   id: r.id, date: r.date, shift: r.shift, unit: r.unit, category: r.category,
   actionTaken: r.action_taken, pendingAction: r.pending_action || '',
+  guestSuite: r.guest_suite || '', checkIn: r.check_in || '',
   createdAt: r.created_at, updatedAt: r.updated_at,
 });
 const logToRow = (l) => ({
   date: l.date, shift: l.shift, unit: l.unit, category: l.category,
   action_taken: l.actionTaken, pending_action: l.pendingAction || null,
+  // Only sent for guest suites, so other logs still save if these columns haven't been added yet.
+  ...(l.category === 'Guest suite' ? { guest_suite: l.guestSuite || null, check_in: l.checkIn || null } : {}),
 });
 const noticeFromRow = (r) => ({ id: r.id, text: r.text, date: r.date });
 
@@ -242,7 +245,7 @@ const logText = (l) => [l.unit, l.category, l.shift, l.actionTaken, l.pendingAct
 const fuText = (f) => [f.title, f.unit, f.category, f.owner, f.assignee, f.priority, f.status, f.nextAction, f.resolution, f.dueDate].join(' ');
 const resText = (r) => [r.name, r.group, r.url, r.notes, r.tags].join(' ');
 const occName = (o) => [o.first_name, o.last_name].filter(Boolean).join(' ');
-const occLabel = (o) => [o.unit, occName(o)].filter(Boolean).join(' — ');
+const occLabel = (o) => [o.unit, occName(o)].filter(Boolean).join(' ');
 const occText = (o) => [o.unit, o.first_name, o.last_name, o.tenant_category].join(' ');
 
 /* Escapes text and wraps search-term matches in <mark>. */
@@ -766,6 +769,22 @@ function syncLogFollowupFields() {
 }
 logForm.elements.makeFollowup.addEventListener('change', syncLogFollowupFields);
 
+/* Relabels the form to match where the entry will appear in the shift note. */
+function applyCategoryHints() {
+  const category = logForm.elements.category.value;
+  const h = { ...CATEGORY_HINTS.default, ...(CATEGORY_HINTS[category] || {}) };
+  const setLabel = (name, text, placeholder) => {
+    const el = logForm.elements[name];
+    el.closest('label').firstChild.textContent = text;
+    el.placeholder = placeholder || '';
+  };
+  setLabel('unit', h.unit, h.unitPh);
+  setLabel('actionTaken', h.action, h.actionPh);
+  setLabel('pendingAction', h.pending, h.pendingPh);
+  $('#guest-suite-fields').hidden = category !== 'Guest suite';
+}
+logForm.elements.category.addEventListener('change', applyCategoryHints);
+
 function openLogDialog(log) {
   logForm.reset();
   clearInvalid(logForm);
@@ -774,10 +793,11 @@ function openLogDialog(log) {
   $('[data-action="delete"]', logForm).hidden = !editing;
   $('#log-followup-fields').hidden = editing;
   setFormValues(logForm, log || {
-    id: '', date: today(), shift: currentShift(), unit: '', category: 'General', actionTaken: '', pendingAction: '',
+    id: '', date: today(), shift: currentShift(), unit: '', category: 'General', actionTaken: '', pendingAction: '', guestSuite: '', checkIn: '',
     makeFollowup: false, fuOwner: 'Concierge', fuDue: dayOffset(1), fuPriority: 'Medium',
   });
   syncLogFollowupFields();
+  applyCategoryHints();
   logDialog.showModal();
   logForm.elements.unit.focus();
 }
@@ -798,6 +818,7 @@ logForm.addEventListener('submit', async (e) => {
   const rec = {
     date: v.date, shift: v.shift, unit: v.unit.trim(), category: v.category,
     actionTaken: v.actionTaken.trim(), pendingAction: v.pendingAction.trim(),
+    guestSuite: v.guestSuite.trim(), checkIn: v.checkIn,
   };
   const btn = $('button[type="submit"]', logForm);
   setBusy(btn, true, 'Saving…');
@@ -948,52 +969,149 @@ $('[data-action="delete"]', resForm).addEventListener('click', async () => {
 
 const noteDialog = $('#note-dialog');
 
+/* The note is built as structured blocks (paragraphs, headings, nested bullets with
+   bold/underlined runs) so it can be rendered as formatted HTML for Outlook and as plain text. */
+
+const NOTE_SECTION = {
+  'Logs and trackers': 'logs', 'Vendor / contractor': 'vendors', 'Guest suite': 'guests', Event: 'events',
+  'Resident touchpoint': 'touchpoints', 'Fitz gift': 'fitz', 'Amenity / common area': 'amenities',
+};
+
+const run = (text, fmt = '') => ({ text, b: fmt.includes('b'), u: fmt.includes('u') });
+const bullet = (runs, children = []) => ({ runs, children });
+// Resident suggestions used to be "E02 — Dana Fox"; the note uses "E02 Dana Fox".
+const who = (unit) => String(unit || '').replace(/\s+—\s+/, ' ').trim();
+
 function buildShiftNote(date, shift) {
-  const logs = state.logs.filter((l) => l.date === date && (!shift || l.shift === shift)).sort((a, b) => a.category.localeCompare(b.category));
-  const open = state.followups.filter((f) => f.status !== 'Done');
-  const lines = [];
-  const title = `SHIFT NOTE — ${fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${shift ? ` (${shift})` : ''}`;
-  lines.push(title, '='.repeat(title.length), '');
+  const logs = state.logs
+    .filter((l) => l.date === date && (!shift || l.shift === shift))
+    .sort((a, b) => (SHIFT_RANK[a.shift] ?? 0) - (SHIFT_RANK[b.shift] ?? 0) || (a.createdAt || '').localeCompare(b.createdAt || ''));
+  const section = (key) => logs.filter((l) => (NOTE_SECTION[l.category] || 'residents') === key);
 
-  if (state.notices.length) {
-    lines.push('NOTICES');
-    state.notices.forEach((n) => lines.push(`  • ${n.text}`));
-    lines.push('');
-  }
+  const blocks = [];
+  const para = (...runs) => blocks.push({ type: 'p', runs });
+  const blank = () => blocks.push({ type: 'blank' });
+  const heading = (text) => { blank(); para(run(text, 'bu')); };
+  const list = (items) => blocks.push({ type: 'list', items });
 
-  lines.push('ACTION NEEDED — BY TEAM');
-  let anyAction = false;
-  OPTIONS.teams.forEach((team) => {
-    const items = sortFollowups(open.filter((f) => f.owner === team));
-    if (!items.length) return;
-    anyAction = true;
-    lines.push(`  ${team.toUpperCase()} (${items.length})`);
-    items.forEach((f) => {
-      const flags = [isOverdue(f) ? 'OVERDUE' : null, f.priority === 'High' ? 'HIGH' : null].filter(Boolean);
-      const tag = flags.length ? `[${flags.join(', ')}] ` : '';
-      lines.push(`    • ${tag}${f.unit ? f.unit + ' — ' : ''}${f.title} (${dueLabel(f).toLowerCase()}, ${f.status.toLowerCase()})`);
-      if (f.nextAction) lines.push(`        Next: ${f.nextAction}`);
-    });
+  const pending = (l, ifEmpty) => (l.pendingAction || ifEmpty
+    ? [bullet([run('Pending:', 'b'), run(` ${l.pendingAction || ifEmpty}`)])] : []);
+  const category = (label, children) => (children.length
+    ? bullet([run(label, 'b')], children)
+    : bullet([run(label, 'b'), run(' NA', 'b')]));
+  const resident = (l, pendingIfEmpty) =>
+    bullet([run(`${who(l.unit)}:`, 'b'), run(` ${l.actionTaken}`)], pending(l, pendingIfEmpty));
+  const vendorLine = (l) => {
+    const name = who(l.unit);
+    return !name || l.actionTaken.toLowerCase().startsWith(name.toLowerCase()) ? l.actionTaken : `${name} – ${l.actionTaken}`;
+  };
+
+  para(run('Hi Team,'));
+  blank();
+  para(run(`Please see the shift notes for ${SHIFT_NOTE.property}.`));
+
+  heading('Operations and Events');
+  list([
+    category('Logs and Trackers:', section('logs').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
+    category('Vendors/Contractors:', section('vendors').map((l) =>
+      bullet([run(vendorLine(l))], l.pendingAction ? [bullet([run(l.pendingAction)])] : []))),
+    category('Guest Suite(s):', section('guests').map((l) =>
+      bullet([run(`Upcoming Check-in${l.checkIn ? ` – ${fmtDate(l.checkIn, { month: 'long', day: 'numeric' })}` : ''}:`)], [
+        bullet([run(`Booked by: ${who(l.unit)}`)]),
+        ...(l.guestSuite ? [bullet([run(`Guest Suite: ${l.guestSuite}`)])] : []),
+        bullet([run(l.actionTaken)]),
+        ...pending(l),
+      ]))),
+    category('Event(s):', section('events').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
+  ]);
+
+  heading('Resident Experience (Completed and Upcoming 120 Days of Resident Touchpoints)');
+  const touchpoints = section('touchpoints');
+  list(touchpoints.length ? touchpoints.map((l) => resident(l)) : [bullet([run('No calls made tonight, will resume tomorrow.', 'b')])]);
+
+  heading('Fitz Gifts:');
+  const fitz = section('fitz');
+  list(fitz.length ? fitz.map((l) => resident(l)) : [bullet([run('NA', 'b')])]);
+
+  heading('Residents and Guests');
+  const residents = section('residents');
+  list(residents.length ? residents.map((l) => resident(l, 'None.')) : [bullet([run('NA', 'b')])]);
+
+  heading('Amenities, Common Areas and Curb Appeal');
+  const places = new Map(); // group entries for the same location under one bullet
+  section('amenities').forEach((l) => {
+    const name = who(l.unit);
+    const key = name.toLowerCase();
+    if (!places.has(key)) places.set(key, bullet([run(`${name}:`, 'b')]));
+    places.get(key).children.push(bullet([run('Concern:', 'b'), run(` ${l.actionTaken}`)]));
+    if (l.pendingAction) places.get(key).children.push(bullet([run('To-Do:', 'b'), run(` ${l.pendingAction}`)]));
   });
-  if (!anyAction) lines.push('  None — all follow-ups are complete.');
-  lines.push('');
+  list([...places.values(), bullet([run('All other amenities in good condition.')])]);
 
-  lines.push(`SHIFT ACTIVITY (${logs.length} entr${logs.length === 1 ? 'y' : 'ies'})`);
-  if (!logs.length) lines.push('  No shift log entries for this date.');
-  let lastCat = null;
-  logs.forEach((l) => {
-    if (l.category !== lastCat) { lines.push(`  ${l.category}`); lastCat = l.category; }
-    lines.push(`    • ${l.unit}${shift ? '' : ` [${l.shift}]`}: ${l.actionTaken}`);
-    if (l.pendingAction) lines.push(`        Pending: ${l.pendingAction}`);
+  blank();
+  para(run('Kind Regards,'));
+  para(run(SHIFT_NOTE.signOff));
+  return blocks;
+}
+
+/* Inline styles only, so the formatting survives pasting into Outlook. */
+const NOTE_FONT = 'font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt;color:#000000';
+const NOTE_BULLETS = ['disc', 'circle', 'square'];
+
+function noteRunsHtml(runs) {
+  return runs.map((r) => {
+    let h = esc(r.text);
+    if (r.u) h = `<u>${h}</u>`;
+    if (r.b) h = `<b>${h}</b>`;
+    return h;
+  }).join('');
+}
+
+function noteListHtml(items, depth) {
+  return `<ul style="margin-top:0;margin-bottom:0;padding-left:0.3in;list-style-type:${NOTE_BULLETS[Math.min(depth, 2)]}">` +
+    items.map((it) => `<li style="margin:0">${noteRunsHtml(it.runs)}${it.children.length ? noteListHtml(it.children, depth + 1) : ''}</li>`).join('') +
+    '</ul>';
+}
+
+function noteHtml(blocks) {
+  return `<div style="${NOTE_FONT}">` + blocks.map((b) => {
+    if (b.type === 'blank') return '<p style="margin:0">&nbsp;</p>';
+    if (b.type === 'p') return `<p style="margin:0">${noteRunsHtml(b.runs)}</p>`;
+    return noteListHtml(b.items, 0);
+  }).join('') + '</div>';
+}
+
+function notePlain(blocks) {
+  const out = [];
+  const symbols = ['•', '○', '▪'];
+  const walk = (items, depth) => items.forEach((it) => {
+    out.push(`${'    '.repeat(depth)}${symbols[Math.min(depth, 2)]} ${it.runs.map((r) => r.text).join('')}`);
+    walk(it.children, depth + 1);
   });
-  return lines.join('\n');
+  blocks.forEach((b) => {
+    if (b.type === 'blank') out.push('');
+    else if (b.type === 'p') out.push(b.runs.map((r) => r.text).join(''));
+    else walk(b.items, 0);
+  });
+  return out.join('\n');
 }
 
 function refreshNote() {
-  $('#note-text').value = buildShiftNote($('#note-date').value || today(), $('#note-shift').value);
+  $('#note-preview').innerHTML = noteHtml(buildShiftNote($('#note-date').value || today(), $('#note-shift').value));
+}
+
+/* True if this computer can draw Calibri in bold (bold text measures wider than regular). */
+function calibriBoldAvailable() {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const sample = 'Operations and Events';
+  ctx.font = '11pt Calibri';
+  const regular = ctx.measureText(sample).width;
+  ctx.font = 'bold 11pt Calibri';
+  return Math.abs(ctx.measureText(sample).width - regular) > 0.5;
 }
 
 function openNoteDialog() {
+  $('#note-preview').classList.toggle('fake-bold', !calibriBoldAvailable());
   $('#note-date').value = today();
   $('#note-shift').value = currentShift();
   refreshNote();
@@ -1004,15 +1122,24 @@ function openNoteDialog() {
 $('#note-date').addEventListener('change', refreshNote);
 $('#note-shift').addEventListener('change', refreshNote);
 
+/* Copies the (possibly edited) preview as formatted HTML, with plain text as a fallback format. */
 $('#note-copy').addEventListener('click', async () => {
-  const ta = $('#note-text');
+  const preview = $('#note-preview');
   try {
-    await navigator.clipboard.writeText(ta.value);
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/html': new Blob([preview.innerHTML], { type: 'text/html' }),
+      'text/plain': new Blob([preview.innerText], { type: 'text/plain' }),
+    })]);
   } catch (_) {
-    ta.select();
+    const range = document.createRange();
+    range.selectNodeContents(preview);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
     document.execCommand('copy');
+    sel.removeAllRanges();
   }
-  toast('Shift note copied — paste it into your email or Teams.');
+  toast('Shift note copied. Paste it into Outlook.');
 });
 
 /* ----- Data dialog ----- */
@@ -1158,7 +1285,7 @@ async function loadOccupants() {
   if (currentView() === 'search') render();
   $('#occupant-list').innerHTML = rows.map((r) => {
     const name = [r.first_name, r.last_name].filter(Boolean).join(' ');
-    const value = [r.unit, name].filter(Boolean).join(' — ');
+    const value = [r.unit, name].filter(Boolean).join(' ');
     return value ? `<option value="${esc(value)}">${esc(r.tenant_category || '')}</option>` : '';
   }).join('');
 }

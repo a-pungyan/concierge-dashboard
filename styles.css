@@ -383,3 +383,15 @@ dialog.login .btn-primary { margin-top: 4px; }
 /* Shared database status */
 .banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; background: var(--info-soft); color: var(--info); font-weight: 550; }
 .banner-error { background: var(--danger-soft); color: var(--danger); }
+
+/* Shift note preview: matches the Outlook email (Calibri 11pt, black on white) in every theme */
+.note-preview {
+  background: #fff; color: #000; border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px 20px; max-height: 60vh; overflow: auto;
+  font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif; font-size: 11pt; line-height: 1.15;
+}
+.note-preview:focus { outline: none; box-shadow: var(--focus); }
+/* Some computers only have the regular Calibri face installed, so bold can't be drawn.
+   The preview then thickens bold text on screen only; the copied HTML still uses <b>,
+   which Outlook renders with its real Calibri Bold. */
+.note-preview.fake-bold b { -webkit-text-stroke: 0.035em currentColor; }
