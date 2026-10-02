@@ -52,6 +52,7 @@
 
 /* ---------- Base ---------- */
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
@@ -360,4 +361,16 @@ dialog h2 { font-size: 1.2rem; }
   .fu-table td[data-label="Task"] { display: block; padding-bottom: 6px; }
   .fu-table td[data-label="Task"]::before { display: none; }
   .fu-table td > div { margin-left: 0; }
+}
+
+/* ---------- Login ---------- */
+.account-email { white-space: nowrap; }
+.signed-out .tabs, .signed-out main, .signed-out .global-search,
+.signed-out #data-btn { visibility: hidden; }
+dialog.login { width: min(400px, calc(100vw - 24px)); }
+dialog.login::backdrop { background: var(--bg); }
+dialog.login .brand { margin-bottom: 4px; }
+dialog.login .btn-primary { margin-top: 4px; }
+@media (max-width: 720px) {
+  .account-email { display: none; }
 }

@@ -6,7 +6,7 @@
   <title>Concierge Dashboard</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="signed-out">
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="topbar">
@@ -14,7 +14,7 @@
       <span class="brand-mark" aria-hidden="true">CD</span>
       <div>
         <div class="brand-name">Concierge Dashboard</div>
-        <div class="brand-sub" id="property-name">The Harbourview · Prototype (fictional data)</div>
+        <div class="brand-sub" id="property-name">EL · Prototype</div>
       </div>
     </div>
     <form class="global-search" role="search" id="global-search-form">
@@ -22,6 +22,8 @@
       <input id="global-search" type="search" placeholder="Search units, names, notes, links…  ( / )" autocomplete="off">
     </form>
     <button class="btn btn-ghost" id="data-btn" type="button">Data</button>
+    <span class="account-email muted small" id="account-email"></span>
+    <button class="btn btn-ghost" id="signout-btn" type="button" hidden>Sign out</button>
   </header>
 
   <nav class="tabs" aria-label="Main">
@@ -38,7 +40,7 @@
   <!-- Shift log dialog -->
   <dialog id="log-dialog" aria-labelledby="log-dialog-title">
     <form id="log-form" method="dialog" novalidate>
-      <h2 id="log-dialog-title">New shift log</h2>
+      <h2 id="log-dialog-title">New log</h2>
       <input type="hidden" name="id">
       <div class="grid-2">
         <label>Date<input type="date" name="date" required></label>
@@ -177,6 +179,23 @@
     </div>
   </dialog>
 
+  <!-- Login dialog (opens automatically when signed out; cannot be dismissed) -->
+  <dialog id="login-dialog" class="login" aria-labelledby="login-title">
+    <form id="login-form" novalidate>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">CD</span>
+        <div class="brand-name">Concierge Dashboard</div>
+      </div>
+      <h2 id="login-title">Sign in</h2>
+      <label>Email<input name="email" type="email" autocomplete="username" required></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>

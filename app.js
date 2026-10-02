@@ -620,7 +620,7 @@ document.addEventListener('click', (e) => {
 });
 
 // Close dialogs when clicking the backdrop.
-$$('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
+$$('dialog:not(#login-dialog)').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
 
 function confirmDialog(message, okLabel = 'Confirm') {
   const d = $('#confirm-dialog');
@@ -956,6 +956,72 @@ $('#clear-btn').addEventListener('click', async () => {
   toast('All records deleted.');
 });
 
+/* ----- Login (Supabase Auth) ----- */
+
+const loginDialog = $('#login-dialog');
+const loginForm = $('#login-form');
+const authConfigured = !!window.supabase && !/YOUR-/.test(SUPABASE_URL + SUPABASE_ANON_KEY);
+const sb = authConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+function showLogin() {
+  document.body.classList.add('signed-out');
+  $('#account-email').textContent = '';
+  $('#signout-btn').hidden = true;
+  $$('dialog[open]').forEach((d) => { if (d !== loginDialog) d.close(); });
+  loginForm.reset();
+  clearInvalid(loginForm);
+  if (!sb) showFormError(loginForm, window.supabase
+    ? 'Sign-in is not set up yet: add your Supabase URL and anon key to config.js.'
+    : 'Could not load the sign-in service. Check your connection and refresh.');
+  if (!loginDialog.open) loginDialog.showModal();
+  loginForm.elements.email.focus();
+}
+
+function onSignedIn(session) {
+  document.body.classList.remove('signed-out');
+  if (loginDialog.open) loginDialog.close();
+  $('#account-email').textContent = session.user.email || '';
+  $('#signout-btn').hidden = false;
+}
+
+// Esc would otherwise close the dialog and reveal the dashboard.
+loginDialog.addEventListener('cancel', (e) => e.preventDefault());
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearInvalid(loginForm);
+  if (!sb) return showLogin();
+  if (!requireFields(loginForm, ['email', 'password'])) return;
+  const btn = $('button[type="submit"]', loginForm);
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({
+      email: loginForm.elements.email.value.trim(),
+      password: loginForm.elements.password.value,
+    });
+    if (error) {
+      loginForm.elements.password.value = '';
+      loginForm.elements.password.focus();
+      showFormError(loginForm, /invalid login credentials/i.test(error.message) ? 'Incorrect email or password.' : error.message);
+      return;
+    }
+    onSignedIn(data.session);
+    toast('Signed in.');
+  } catch (_) {
+    showFormError(loginForm, 'Could not reach the sign-in server. Check your connection and try again.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
+  }
+});
+
+$('#signout-btn').addEventListener('click', async () => {
+  try { await sb.auth.signOut(); } catch (_) { /* still show the login below */ }
+  showLogin();
+  toast('Signed out.');
+});
+
 /* ---------- Main event delegation ---------- */
 
 const main = $('#main');
@@ -1090,3 +1156,13 @@ document.addEventListener('keydown', (e) => {
 /* ---------- Boot ---------- */
 
 render();
+
+if (sb) {
+  sb.auth.getSession()
+    .then(({ data }) => (data.session ? onSignedIn(data.session) : showLogin()))
+    .catch(showLogin);
+  // Covers sign-out in another tab and expired sessions.
+  sb.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') showLogin(); });
+} else {
+  showLogin();
+}
