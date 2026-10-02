@@ -49,7 +49,7 @@
             <option>Morning</option><option>Afternoon</option><option>Overnight</option>
           </select>
         </label>
-        <label>Unit or name<input name="unit" required placeholder="e.g. 1204 or J. Rivera" autocomplete="off"></label>
+        <label>Unit or name<input name="unit" list="occupant-list" required placeholder="Type a unit or resident name" autocomplete="off"></label>
         <label>Category<select name="category" data-options="categories"></select></label>
       </div>
       <label>Action taken<textarea name="actionTaken" rows="3" required placeholder="What happened and what you did"></textarea></label>
@@ -83,7 +83,7 @@
       <input type="hidden" name="id">
       <label>Task / follow-up<input name="title" required placeholder="e.g. Confirm plumber visit for leak" autocomplete="off"></label>
       <div class="grid-2">
-        <label>Unit or name<input name="unit" placeholder="e.g. 807" autocomplete="off"></label>
+        <label>Unit or name<input name="unit" list="occupant-list" placeholder="Type a unit or resident name" autocomplete="off"></label>
         <label>Category<select name="category" data-options="categories"></select></label>
         <label>Owner<select name="owner" data-options="teams"></select></label>
         <label>Assigned to (optional)<input name="assignee" placeholder="Person's name" autocomplete="off"></label>
@@ -178,6 +178,9 @@
       </div>
     </div>
   </dialog>
+
+  <!-- Resident suggestions for the "Unit or name" inputs; filled from Supabase after sign-in -->
+  <datalist id="occupant-list"></datalist>
 
   <!-- Login dialog (opens automatically when signed out; cannot be dismissed) -->
   <dialog id="login-dialog" class="login" aria-labelledby="login-title">

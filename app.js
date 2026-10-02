@@ -973,6 +973,7 @@ function showLogin() {
   document.body.classList.add('signed-out');
   $('#account-email').textContent = '';
   $('#signout-btn').hidden = true;
+  $('#occupant-list').innerHTML = '';
   $$('dialog[open]').forEach((d) => { if (d !== loginDialog) d.close(); });
   loginForm.reset();
   clearInvalid(loginForm);
@@ -986,6 +987,41 @@ function onSignedIn(session) {
   if (loginDialog.open) loginDialog.close();
   $('#account-email').textContent = session.user.email || '';
   $('#signout-btn').hidden = false;
+  loadOccupants();
+}
+
+/* Fills the "Unit or name" suggestions from the occupant_report table.
+   Supabase returns at most 1000 rows per request, so this pages through. */
+async function loadOccupants() {
+  const PAGE = 1000;
+  const rows = [];
+  try {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await sb
+        .from('occupant_report')
+        .select('unit, first_name, last_name, tenant_category')
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      rows.push(...data);
+      if (data.length < PAGE) break;
+    }
+  } catch (err) {
+    console.error('Could not load occupants:', err);
+    toast('Could not load the resident list. You can still type units and names manually.', 'error');
+    return;
+  }
+  if (!rows.length) {
+    toast('Resident list is empty — check the occupant_report SELECT policy in Supabase.', 'error');
+    return;
+  }
+  rows.sort((a, b) =>
+    String(a.unit ?? '').localeCompare(String(b.unit ?? ''), undefined, { numeric: true }) ||
+    String(a.last_name ?? '').localeCompare(String(b.last_name ?? '')));
+  $('#occupant-list').innerHTML = rows.map((r) => {
+    const name = [r.first_name, r.last_name].filter(Boolean).join(' ');
+    const value = [r.unit, name].filter(Boolean).join(' — ');
+    return value ? `<option value="${esc(value)}">${esc(r.tenant_category || '')}</option>` : '';
+  }).join('');
 }
 
 // Esc would otherwise close the dialog and reveal the dashboard.
