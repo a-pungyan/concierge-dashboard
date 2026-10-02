@@ -963,6 +963,12 @@ const loginForm = $('#login-form');
 const authConfigured = !!window.supabase && !/YOUR-/.test(SUPABASE_URL + SUPABASE_ANON_KEY);
 const sb = authConfigured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+function authSetupError() {
+  return window.supabase
+    ? 'Sign-in is not set up yet: add your Supabase URL and anon key to config.js.'
+    : 'Could not load the sign-in service. Check your connection and refresh.';
+}
+
 function showLogin() {
   document.body.classList.add('signed-out');
   $('#account-email').textContent = '';
@@ -970,9 +976,7 @@ function showLogin() {
   $$('dialog[open]').forEach((d) => { if (d !== loginDialog) d.close(); });
   loginForm.reset();
   clearInvalid(loginForm);
-  if (!sb) showFormError(loginForm, window.supabase
-    ? 'Sign-in is not set up yet: add your Supabase URL and anon key to config.js.'
-    : 'Could not load the sign-in service. Check your connection and refresh.');
+  if (!sb) showFormError(loginForm, authSetupError());
   if (!loginDialog.open) loginDialog.showModal();
   loginForm.elements.email.focus();
 }
@@ -990,7 +994,7 @@ loginDialog.addEventListener('cancel', (e) => e.preventDefault());
 loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   clearInvalid(loginForm);
-  if (!sb) return showLogin();
+  if (!sb) return showFormError(loginForm, authSetupError());
   if (!requireFields(loginForm, ['email', 'password'])) return;
   const btn = $('button[type="submit"]', loginForm);
   btn.disabled = true;
