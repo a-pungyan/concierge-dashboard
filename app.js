@@ -1416,7 +1416,7 @@ function buildShiftNote(date, shift) {
 
   para(run('Hi Team,'));
   blank();
-  para(run(`Please see the shift notes for ${SHIFT_NOTE.property}.`));
+  para(run(`Please see shift notes for ${SHIFT_NOTE.property}.`));
 
   /* Operations and Events: the four standard subsections, then any general operations updates. */
   heading('Operations and Events');
@@ -1495,7 +1495,6 @@ function buildShiftNote(date, shift) {
 
   blank();
   para(run('Kind Regards,'));
-  para(run(SHIFT_NOTE.signOff));
   return blocks;
 }
 

@@ -3,8 +3,7 @@
 
 /* Shift note template settings. */
 const SHIFT_NOTE = {
-  property: 'Ledbury',
-  signOff: 'Andrea',
+  property: 'Elm–Ledbury',
 };
 
 const OPTIONS = {
