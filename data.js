@@ -1,6 +1,5 @@
 /* Constants and fictional sample data for the Concierge Dashboard prototype.
-   All names, units and links below are made up. Replace resource links with
-   your real systems from the Resources tab (they are stored in this browser). */
+   All names and units below are made up. Resources are managed in Supabase. */
 
 /* Shift note template settings. */
 const SHIFT_NOTE = {
@@ -16,6 +15,42 @@ const OPTIONS = {
   statuses: ['Open', 'In progress', 'Waiting', 'Done'],
   resourceGroups: ['Work systems', 'SharePoint trackers', 'SOPs', 'Guides & tips', 'Contacts'],
   shifts: ['Morning', 'Afternoon', 'Overnight'],
+};
+
+/* Overview quick-access sidebar. Leave url empty to use the Resource with the same name
+   (or the name given in "resource"), which the admin manages on the Resources tab.
+   If neither is set, the item shows greyed out until a link is added. */
+const QUICK_ACCESS = [
+  {
+    title: 'Frequently Used',
+    links: [
+      { name: 'Yardi', url: '' },
+      { name: 'Rise', url: '' },
+      { name: 'LuxerOne', url: '' },
+      { name: 'Sharepoint', url: '' },
+      { name: '88Q Credentials', url: '' },
+      { name: 'SP+ Parking', url: '' },
+    ],
+  },
+  {
+    title: 'Trackers',
+    links: [
+      { name: 'Guest Suite', url: '' },
+      { name: 'Guest Keycard', url: '' },
+      { name: 'Live Events', url: '' },
+      { name: '4S & Corporate Stays', url: '' },
+      { name: 'Elevator OOS', url: '' },
+    ],
+  },
+];
+
+/* Current weather on the Overview, from Open-Meteo (free, no API key needed).
+   Set a place name (e.g. 'Toronto') or exact coordinates. Leave both empty to hide it. */
+const WEATHER = {
+  location: '',
+  latitude: null,
+  longitude: null,
+  unit: 'celsius', // or 'fahrenheit'
 };
 
 /* Suggestions for free-text fields (people can still type their own value). */
@@ -171,29 +206,6 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-function sampleResources() {
-  const r = (group, name, url, notes, tags = '') => ({ id: uid(), group, name, url, notes, tags, pinned: false });
-  return [
-    r('Work systems', 'Property management system', 'https://example.com/pms', 'Resident profiles, unit info, ledgers. Search by unit number first — faster than by name.', 'yardi, residents'),
-    r('Work systems', 'Resident app admin', 'https://example.com/resident-app', 'Post announcements and approve amenity bookings.', 'rise, announcements, amenities'),
-    r('Work systems', 'Package locker portal', 'https://example.com/lockers', 'Re-send pickup codes from the “Deliveries” tab.', 'packages, parcels'),
-    r('Work systems', 'Work order system', 'https://example.com/work-orders', 'Always include unit, location in unit, and permission to enter.', 'maintenance, repairs'),
-    r('SharePoint trackers', 'Package tracker', 'https://example.sharepoint.com/sites/property/Lists/Packages', 'Log oversized packages that do not fit in the lockers.', 'packages'),
-    r('SharePoint trackers', 'Key & fob tracker', 'https://example.sharepoint.com/sites/property/Lists/Keys', 'Record every fob issued, deactivated or replaced.', 'keys, fobs, access'),
-    r('SharePoint trackers', 'Amenity booking tracker', 'https://example.sharepoint.com/sites/property/Lists/Amenities', 'Party room deposits go here too.', 'amenities, party room'),
-    r('SharePoint trackers', 'Incident tracker', 'https://example.sharepoint.com/sites/property/Lists/Incidents', 'Fill out the same shift as the incident. Attach photos.', 'security, incidents'),
-    r('SharePoint trackers', 'Move in / out tracker', 'https://example.sharepoint.com/sites/property/Lists/Moves', 'Book the service elevator and pad it 30 min before.', 'moves, elevator'),
-    r('SOPs', 'Water leak SOP', 'https://example.sharepoint.com/sites/property/SOPs/WaterLeak.pdf', '1) Shut-off valve 2) Call on-call maintenance 3) Notify units below 4) Incident tracker.', 'leak, flood, emergency'),
-    r('SOPs', 'Lockout SOP', 'https://example.sharepoint.com/sites/property/SOPs/Lockout.pdf', 'Verify ID against the resident profile before opening any door.', 'lockout, keys'),
-    r('SOPs', 'Fire alarm SOP', 'https://example.sharepoint.com/sites/property/SOPs/FireAlarm.pdf', 'Do not silence the panel. Meet the fire department at the front entrance.', 'fire, alarm, emergency'),
-    r('Guides & tips', 'Shift note template', 'https://example.sharepoint.com/sites/property/Guides/ShiftNote.docx', 'Or use “Generate shift note” on the Shift Log tab.', 'shift note, handover'),
-    r('Guides & tips', 'Writing good handovers', 'https://example.com/guides/handover', 'Lead with anything that needs action. One line per unit.', 'handover, tips'),
-    r('Contacts', 'On-call maintenance', 'tel:555-0100', '555-0100 — after hours and weekends.', 'maintenance, emergency, phone'),
-    r('Contacts', 'Property manager (fictional)', 'mailto:pm@example.com', 'pm@example.com — escalate anything involving cost or legal.', 'pm, escalation'),
-    r('Contacts', 'Security company', 'tel:555-0199', '555-0199 — patrol requests and incidents.', 'security, phone'),
-  ];
-}
-
 const SAMPLE_NAMES = ['A. Chen', 'M. Okafor', 'L. Moreau', 'D. Singh', 'R. Alvarez', 'K. Nakamura', 'S. Haddad', 'T. Novak', 'P. Mensah', 'J. Rivera'];
 
 function sampleUnit() {
@@ -222,7 +234,6 @@ function sampleData() {
       fu('Remind resident about bike box pickup', '1204', 'Package', 'Concierge', 1, 'Low', 'Open', 'Call if not picked up by tomorrow.'),
       fu('Replace hallway light on 14th floor', '14th floor', 'Maintenance', 'Maintenance', -4, 'Low', 'Done', '', 'Bulb replaced by maintenance.'),
     ],
-    resources: sampleResources(),
   };
 }
 

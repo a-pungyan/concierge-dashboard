@@ -13,9 +13,11 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 /* ---------- Storage ---------- */
 
-/* Follow-ups and resources are saved in this browser. Shift logs and notices live in
-   Supabase (shared by the team): they are held in state.logs / state.notices while
-   signed in, but never written to browser storage. */
+/* Follow-ups and each person's pinned resources are saved in this browser. Shift logs,
+   notices and resources live in Supabase (shared by the team): they are held in
+   state.logs / state.notices / state.resources while signed in, but never written to
+   browser storage. legacyResources is the list older versions kept in the browser,
+   kept until the admin copies it to Supabase or discards it. */
 
 function normalize(d) {
   return {
@@ -23,11 +25,13 @@ function normalize(d) {
     logs: [],
     followups: Array.isArray(d.followups) ? d.followups : [],
     notices: [],
-    resources: Array.isArray(d.resources) ? d.resources : [],
+    resources: [],
+    pins: Array.isArray(d.pins) ? d.pins : [],
+    legacyResources: Array.isArray(d.legacyResources) ? d.legacyResources : Array.isArray(d.resources) ? d.resources : [],
   };
 }
 
-const localPart = (s) => ({ version: 1, followups: s.followups, resources: s.resources });
+const localPart = (s) => ({ version: 1, followups: s.followups, pins: s.pins, legacyResources: s.legacyResources });
 
 /* Completed follow-ups are removed this many days after they were last updated.
    Open follow-ups are kept until they are done. (Shift logs and notices are
@@ -56,8 +60,8 @@ function loadState() {
       const loaded = normalize(parsed);
       const before = loaded.followups.length;
       loaded.followups = pruneFollowups(loaded.followups);
-      // Older versions kept (sample) shift logs and notices here; drop them.
-      if ('logs' in parsed || 'notices' in parsed || loaded.followups.length !== before) {
+      // Older versions kept shift logs, notices and resources here; rewrite in the current shape.
+      if ('logs' in parsed || 'notices' in parsed || 'resources' in parsed || loaded.followups.length !== before) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(loaded))); } catch (_) { /* ignore */ }
       }
       return loaded;
@@ -176,7 +180,45 @@ async function loadCloud({ quiet = false } = {}) {
 function clearCloud() {
   state.logs = [];
   state.notices = [];
+  state.resources = [];
   cloudStatus = 'idle';
+  resourcesStatus = 'idle';
+  isAdmin = false;
+}
+
+/* ----- Shared resources: everyone signed in can read them; only admins can change them. ----- */
+
+let resourcesStatus = 'idle'; // idle | loading | ready | error
+let resourcesError = '';
+let isAdmin = false;
+
+const resFromRow = (r) => ({ id: r.id, group: r.group_name, name: r.name, url: r.url, notes: r.notes || '', tags: r.tags || '' });
+const resToRow = (r) => ({ group_name: r.group, name: r.name, url: r.url, notes: r.notes || null, tags: r.tags || null });
+const isPinned = (r) => state.pins.includes(r.id);
+
+/* The app_admins policy only returns the signed-in user's own row, so any row means "admin".
+   This only decides which buttons to show; Supabase enforces the real rule. */
+async function checkAdmin() {
+  const { data, error } = await sb.from('app_admins').select('user_id').limit(1);
+  if (error) { console.warn('Could not check admin status:', error); return false; }
+  return data.length > 0;
+}
+
+async function loadResources({ quiet = false } = {}) {
+  if (!sb) return;
+  if (!quiet) resourcesStatus = 'loading';
+  try {
+    const [rows, admin] = await Promise.all([fetchAll('resources'), checkAdmin()]);
+    state.resources = rows.map(resFromRow);
+    isAdmin = admin;
+    resourcesStatus = 'ready';
+  } catch (err) {
+    console.error(err);
+    if (quiet) return;
+    resourcesStatus = 'error';
+    resourcesError = dbErrorMessage(err);
+  }
+  if (!document.querySelector('dialog[open]:not(#login-dialog)')) render();
 }
 
 function cloudBanner() {
@@ -339,6 +381,7 @@ function render() {
   const active = document.activeElement;
   const focusKey = active && main.contains(active) ? active.dataset.focusKey : null;
   const selStart = focusKey && active.selectionStart;
+  main.dataset.view = view;
   main.innerHTML = VIEWS[view]();
   if (focusKey) {
     const el = main.querySelector(`[data-focus-key="${focusKey}"]`);
@@ -437,7 +480,7 @@ function viewOverview() {
   const upcoming = active.filter((f) => f.dueDate > t && f.dueDate <= weekOut && f.priority !== 'High').sort(byDue);
   const todaysLogs = state.logs.filter((l) => l.date === t);
   const recent = [...state.logs].sort(byLogRecent).slice(0, 6);
-  const pinned = state.resources.filter((r) => r.pinned);
+  const pinned = state.resources.filter(isPinned);
   const highCount = active.filter((f) => f.priority === 'High').length;
 
   const hour = new Date().getHours();
@@ -454,11 +497,13 @@ function viewOverview() {
     </button>`;
 
   return `
+  <div class="overview-layout">
+    <div class="overview-head">
     ${cloudBanner()}
     <div class="page-head">
       <div>
         <h1>${greet}</h1>
-        <p class="muted">${esc(fmtDate(t, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))} · ${esc(currentShift())} shift</p>
+        <p class="muted">${esc(fmtDate(t, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))} · ${esc(currentShift())} shift<span class="weather" id="weather"${weatherText ? '' : ' hidden'}>${esc(weatherText)}</span></p>
       </div>
       <div class="actions">
         <button type="button" class="btn btn-primary" data-action="new-log">+ Shift log</button>
@@ -466,7 +511,11 @@ function viewOverview() {
         <button type="button" class="btn" data-action="shift-note">Generate shift note</button>
       </div>
     </div>
+    </div>
 
+    ${quickAccessHtml()}
+
+    <div class="overview-main">
     <div class="team-filter" role="group" aria-label="Show actionable items for">
       <span class="muted">Actionable items for:</span>
       <div class="segmented">${teamButtons}</div>
@@ -504,7 +553,80 @@ function viewOverview() {
           pinned.length ? `<ul class="quick-links">${pinned.map(resourceLink).join('')}</ul>` : emptyState('Pin resources on the Resources tab to show them here.'),
           '<a href="#resources" class="small-link">All resources</a>')}
       </div>
-    </div>`;
+    </div>
+    </div>
+  </div>`;
+}
+
+/* ----- Overview quick-access sidebar ----- */
+
+function quickAccessUrl(link) {
+  if (link.url) return link.url;
+  const target = (link.resource || link.name).trim().toLowerCase();
+  return state.resources.find((r) => r.name.trim().toLowerCase() === target)?.url || '';
+}
+
+function quickAccessHtml() {
+  return `<aside class="quick-access" aria-label="Quick access">${QUICK_ACCESS.map((group) => `
+    <section class="quick-card">
+      <h2>${esc(group.title)}</h2>
+      <ul>${group.links.map((link) => {
+        const url = safeUrl(quickAccessUrl(link));
+        const ext = url && /^https?:/i.test(url);
+        return `<li>${url
+          ? `<a href="${esc(url)}"${ext ? ' target="_blank" rel="noopener noreferrer"' : ''}>${esc(link.name)}${ext ? '<span class="sr-only"> (opens in new tab)</span>' : ''}</a>`
+          : `<span class="unset" title="No link yet. Add a resource named “${esc(link.resource || link.name)}”.">${esc(link.name)}</span>`}</li>`;
+      }).join('')}</ul>
+    </section>`).join('')}
+  </aside>`;
+}
+
+/* ----- Current weather (Open-Meteo, no API key) ----- */
+
+let weatherText = ''; // empty = hidden
+
+const WEATHER_CODES = {
+  0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Fog',
+  51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 66: 'Freezing rain', 67: 'Freezing rain',
+  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow', 77: 'Snow grains',
+  80: 'Rain showers', 81: 'Rain showers', 82: 'Heavy rain showers', 85: 'Snow showers', 86: 'Heavy snow showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail',
+};
+
+async function fetchJson(url) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadWeather() {
+  let { latitude, longitude } = WEATHER;
+  const hasCoords = latitude != null && longitude != null;
+  if (!hasCoords && !WEATHER.location) return; // not configured: keep it hidden
+  const fahrenheit = WEATHER.unit === 'fahrenheit';
+  try {
+    if (!hasCoords) {
+      const geo = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?count=1&name=${encodeURIComponent(WEATHER.location)}`);
+      if (!geo.results?.length) throw new Error(`Location not found: ${WEATHER.location}`);
+      ({ latitude, longitude } = geo.results[0]);
+    }
+    const data = await fetchJson(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
+      `&current=temperature_2m,weather_code&temperature_unit=${fahrenheit ? 'fahrenheit' : 'celsius'}`);
+    const { temperature_2m: temp, weather_code: code } = data.current;
+    weatherText = `${Math.round(temp)}°${fahrenheit ? 'F' : 'C'} · ${WEATHER_CODES[code] || 'Current conditions'}`;
+  } catch (err) {
+    console.warn('Weather unavailable:', err);
+    weatherText = 'Weather unavailable';
+  }
+  const el = $('#weather');
+  if (el) { el.textContent = weatherText; el.hidden = !weatherText; }
 }
 
 function resourceLink(r) {
@@ -665,8 +787,8 @@ function viewResources() {
           ${url ? `<a class="res-name" href="${esc(url)}"${ext ? ' target="_blank" rel="noopener noreferrer"' : ''}>${hl(r.name, ts)}${ext ? '<span class="sr-only"> (opens in new tab)</span> <span aria-hidden="true">↗</span>' : ''}</a>`
                 : `<span class="res-name">${hl(r.name, ts)}</span>`}
           <span class="spacer"></span>
-          <button type="button" class="btn btn-sm btn-ghost" data-action="pin-res" data-id="${r.id}" aria-pressed="${!!r.pinned}" title="Show on Overview">${r.pinned ? '★ Pinned' : '☆ Pin'}</button>
-          <button type="button" class="btn btn-sm btn-ghost" data-action="edit-res" data-id="${r.id}" aria-label="Edit ${esc(r.name)}">Edit</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-action="pin-res" data-id="${r.id}" aria-pressed="${isPinned(r)}" title="Show on your Overview">${isPinned(r) ? '★ Pinned' : '☆ Pin'}</button>
+          ${isAdmin ? `<button type="button" class="btn btn-sm btn-ghost" data-action="edit-res" data-id="${r.id}" aria-label="Edit ${esc(r.name)}">Edit</button>` : ''}
         </div>
         ${!url ? `<div class="small">${hl(r.url, ts)}</div>` : ''}
         ${r.notes ? `<p class="res-notes">${hl(r.notes, ts)}</p>` : ''}
@@ -674,23 +796,39 @@ function viewResources() {
       </li>`;
   };
 
+  const legacy = state.legacyResources.length;
+  let banner = '';
+  if (resourcesStatus === 'loading') banner = '<p class="banner">Loading resources…</p>';
+  else if (resourcesStatus === 'error') {
+    banner = `<div class="banner banner-error" role="alert">Could not load resources. ${esc(resourcesError)}
+      <button type="button" class="btn btn-sm" data-action="retry-res">Try again</button></div>`;
+  } else if (isAdmin && legacy) {
+    banner = `<div class="banner">${legacy} resource${legacy === 1 ? ' is' : 's are'} saved only in this browser from before.
+      Copy ${legacy === 1 ? 'it' : 'them'} to the shared list so the whole team can see ${legacy === 1 ? 'it' : 'them'}.
+      <button type="button" class="btn btn-sm" data-action="upload-legacy-res">Copy to shared list</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-action="discard-legacy-res">Discard</button></div>`;
+  }
+
   return `
+    ${banner}
     <div class="page-head">
-      <div><h1>Resources</h1><p class="muted">Work systems, SharePoint trackers, SOPs, guides and contacts. Linked systems still use their own login.</p></div>
-      <div class="actions"><button type="button" class="btn btn-primary" data-action="new-res">+ Resource</button></div>
+      <div><h1>Resources</h1><p class="muted">Work systems, SharePoint trackers, SOPs, guides and contacts. Linked systems still use their own login.${isAdmin ? '' : ' Pin the ones you use most to your Overview.'}</p></div>
+      ${isAdmin ? '<div class="actions"><button type="button" class="btn btn-primary" data-action="new-res">+ Resource</button></div>' : ''}
     </div>
     <form class="filters" data-form="res-filters" aria-label="Filter resources">
       <label class="grow">Find a resource<input type="search" name="q" value="${esc(ui.resQuery)}" data-focus-key="res-q" placeholder="e.g. leak, fob, packages"></label>
     </form>
     <p class="result-count" aria-live="polite">${matches.length} of ${state.resources.length} resources</p>
     <div class="res-grid">
-      ${groups.filter(([, items]) => items.length || !ts.length).map(([g, items]) => `
+      ${groups.filter(([, items]) => items.length || (!ts.length && state.resources.length)).map(([g, items]) => `
         <section class="card">
           <header class="card-head"><h2>${esc(g)} <span class="count">${items.length}</span></h2></header>
           ${items.length ? `<ul class="res-list">${items.map(card).join('')}</ul>` : emptyState('Nothing here yet.')}
         </section>`).join('')}
     </div>
     ${ts.length && !matches.length ? emptyState('No resources match. Try the global search for logs and follow-ups.') : ''}
+    ${!ts.length && !state.resources.length && resourcesStatus === 'ready'
+      ? emptyState(isAdmin ? 'No shared resources yet. Add one with + Resource.' : 'No resources have been added yet.') : ''}
   `;
 }
 
@@ -1095,6 +1233,7 @@ const resDialog = $('#res-dialog');
 const resForm = $('#res-form');
 
 function openResDialog(res) {
+  if (!isAdmin) return toast('Only the dashboard admin can change resources.', 'error');
   resForm.reset();
   clearInvalid(resForm);
   const editing = !!res;
@@ -1105,7 +1244,7 @@ function openResDialog(res) {
   resForm.elements.name.focus();
 }
 
-resForm.addEventListener('submit', (e) => {
+resForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   clearInvalid(resForm);
   if (!requireFields(resForm, ['name', 'url'])) return;
@@ -1114,27 +1253,52 @@ resForm.addEventListener('submit', (e) => {
   // Turn bare domains into links; leave phone numbers and plain text as contact info.
   if (!safeUrl(url) && /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(url)) url = 'https://' + url;
   const rec = { name: v.name.trim(), url, group: v.group, tags: v.tags.trim(), notes: v.notes.trim() };
-  const result = commit((s) => {
-    if (v.id) {
-      const i = s.resources.findIndex((r) => r.id === v.id);
-      if (i >= 0) s.resources[i] = { ...s.resources[i], ...rec };
-    } else {
-      s.resources.push({ id: uid(), pinned: false, ...rec });
-    }
-  });
-  if (!result.ok) return showFormError(resForm, `${result.error} Your entry has been kept — try saving again.`);
+  const btn = $('button[type="submit"]', resForm);
+  setBusy(btn, true, 'Saving…');
+  const res = await db(() => (v.id
+    ? sb.from('resources').update({ ...resToRow(rec), updated_at: new Date().toISOString() }).eq('id', v.id).select().single()
+    : sb.from('resources').insert(resToRow(rec)).select().single()));
+  setBusy(btn, false);
+  if (!res.ok) return showFormError(resForm, `${res.error} Your entry has been kept — try saving again.`);
+  const saved = resFromRow(res.data);
+  const i = state.resources.findIndex((r) => r.id === saved.id);
+  if (i >= 0) state.resources[i] = saved; else state.resources.push(saved);
+  render();
   resDialog.close();
-  toast('Resource saved.');
+  toast('Resource saved for everyone.');
 });
 
 $('[data-action="delete"]', resForm).addEventListener('click', async () => {
   const id = resForm.elements.id.value;
-  if (!(await confirmDialog('Delete this resource link?', 'Delete'))) return;
-  const r = commit((s) => { s.resources = s.resources.filter((x) => x.id !== id); });
-  if (!r.ok) return showFormError(resForm, r.error);
+  if (!(await confirmDialog('Delete this resource for everyone?', 'Delete'))) return;
+  const res = await db(() => sb.from('resources').delete().eq('id', id).select());
+  if (res.ok && !res.data.length) res.ok = false, res.error = dbErrorMessage({ code: 'PGRST116' });
+  if (!res.ok) return showFormError(resForm, res.error);
+  state.resources = state.resources.filter((x) => x.id !== id);
+  commit((s) => { s.pins = s.pins.filter((p) => p !== id); });
+  render();
   resDialog.close();
   toast('Resource deleted.');
 });
+
+/* One-time move of the resources older versions kept in this browser into Supabase.
+   Skips any that are already in the shared list and carries the browser's pins across. */
+async function uploadLegacyResources(btn) {
+  const key = (r) => `${r.name.trim().toLowerCase()}|${String(r.url).trim().toLowerCase()}`;
+  const existing = new Set(state.resources.map(key));
+  const toAdd = state.legacyResources.filter((r) => r.name && r.url && !existing.has(key(r)));
+  setBusy(btn, true, 'Copying…');
+  const res = toAdd.length ? await db(() => sb.from('resources').insert(toAdd.map(resToRow)).select()) : { ok: true, data: [] };
+  setBusy(btn, false);
+  if (!res.ok) return toast(`${res.error} Nothing was copied.`, 'error');
+  const added = res.data.map(resFromRow);
+  state.resources.push(...added);
+  const all = new Map(state.resources.map((r) => [key(r), r.id]));
+  const pinIds = state.legacyResources.filter((r) => r.pinned).map((r) => all.get(key(r))).filter(Boolean);
+  const r = commit((s) => { s.legacyResources = []; s.pins = [...new Set([...s.pins, ...pinIds])]; });
+  if (!r.ok) toast(r.error, 'error');
+  toast(`Copied ${added.length} resource${added.length === 1 ? '' : 's'} to the shared list.`);
+}
 
 /* ----- Shift note generator ----- */
 
@@ -1354,8 +1518,8 @@ function openDataDialog() {
   let bytes = 0;
   try { bytes = (localStorage.getItem(STORAGE_KEY) || '').length; } catch (_) { /* ignore */ }
   $('#data-stats').textContent =
-    `Shared database: ${state.logs.length} shift logs · ${state.notices.length} notices. ` +
-    `This browser: ${state.followups.length} follow-ups · ${state.resources.length} resources · ~${Math.ceil(bytes / 1024)} KB used.`;
+    `Shared database: ${state.logs.length} shift logs · ${state.notices.length} notices · ${state.resources.length} resources. ` +
+    `This browser: ${state.followups.length} follow-ups · ~${Math.ceil(bytes / 1024)} KB used.`;
   showFormError(dataDialog, '');
   dataDialog.showModal();
 }
@@ -1381,22 +1545,22 @@ $('#import-file').addEventListener('change', async (e) => {
   let data;
   try {
     data = JSON.parse(await file.text());
-    if (!data || (!Array.isArray(data.followups) && !Array.isArray(data.resources))) throw new Error('shape');
+    if (!data || !Array.isArray(data.followups)) throw new Error('shape');
   } catch (_) {
     return showFormError(dataDialog, 'That file is not a Concierge Dashboard backup.');
   }
   const imported = normalize(data);
-  if (!(await confirmDialog(`Replace this browser's follow-ups and resources with the backup (${imported.followups.length} follow-ups, ${imported.resources.length} resources)? Shared shift logs and notices are not changed.`, 'Replace'))) return;
-  const r = commit((s) => { s.followups = imported.followups; s.resources = imported.resources; });
+  if (!(await confirmDialog(`Replace this browser's follow-ups with the backup (${imported.followups.length} follow-ups)? Shared shift logs, notices and resources are not changed.`, 'Replace'))) return;
+  const r = commit((s) => { s.followups = imported.followups; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
   toast('Backup imported.');
 });
 
 $('#seed-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog("Replace this browser's follow-ups and resources with the fictional sample data? Shared shift logs and notices are not changed.", 'Reset'))) return;
+  if (!(await confirmDialog("Replace this browser's follow-ups with the fictional sample data? Shared shift logs, notices and resources are not changed.", 'Reset'))) return;
   const sample = sampleData();
-  const r = commit((s) => { s.followups = sample.followups; s.resources = sample.resources; });
+  const r = commit((s) => { s.followups = sample.followups; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
   toast('Sample data loaded.');
@@ -1413,11 +1577,11 @@ $('#perf-btn').addEventListener('click', () => {
 });
 
 $('#clear-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog('Delete all follow-ups and resources saved in this browser? Shared shift logs and notices are not affected. Export a backup first if you need one.', 'Delete'))) return;
-  const r = commit((s) => { s.followups = []; s.resources = []; });
+  if (!(await confirmDialog('Delete all follow-ups saved in this browser? Shared shift logs, notices and resources are not affected. Export a backup first if you need one.', 'Delete'))) return;
+  const r = commit((s) => { s.followups = []; });
   if (!r.ok) return showFormError(dataDialog, r.error);
   dataDialog.close();
-  toast('Follow-ups and resources deleted from this browser.');
+  toast('Follow-ups deleted from this browser.');
 });
 
 /* ----- Login (Supabase Auth) ----- */
@@ -1456,6 +1620,7 @@ function onSignedIn(session) {
   $('#signout-btn').hidden = false;
   loadOccupants();
   loadCloud();
+  loadResources();
 }
 
 /* Fills the "Unit or name" suggestions from the occupant_report table.
@@ -1564,7 +1729,7 @@ main.addEventListener('click', (e) => {
       return;
     }
     case 'pin-res': {
-      const r = commit((s) => { const x = s.resources.find((y) => y.id === id); if (x) x.pinned = !x.pinned; });
+      const r = commit((s) => { s.pins = s.pins.includes(id) ? s.pins.filter((p) => p !== id) : [...s.pins, id]; });
       if (!r.ok) toast(r.error, 'error');
       else main.querySelector(`[data-action="pin-res"][data-id="${id}"]`)?.focus();
       return;
@@ -1582,6 +1747,15 @@ main.addEventListener('click', (e) => {
       return;
     }
     case 'retry-cloud': return loadCloud();
+    case 'retry-res': return loadResources();
+    case 'upload-legacy-res': return uploadLegacyResources(el);
+    case 'discard-legacy-res':
+      confirmDialog(`Discard the ${state.legacyResources.length} resources saved only in this browser? The shared list is not affected.`, 'Discard').then((yes) => {
+        if (!yes) return;
+        const r = commit((s) => { s.legacyResources = []; });
+        toast(r.ok ? 'Browser-only resources discarded.' : r.error, r.ok ? 'ok' : 'error');
+      });
+      return;
     case 'clear-log-filters':
       ui.logFilters = { q: '', section: '', shift: '', from: '', to: '' };
       return render();
@@ -1688,12 +1862,15 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && cloudStatus === 'ready' && Date.now() - lastCloudLoad > 60000) {
     loadCloud({ quiet: true });
+    loadResources({ quiet: true });
   }
 });
 
 /* ---------- Boot ---------- */
 
 render();
+loadWeather();
+setInterval(loadWeather, 30 * 60 * 1000); // refresh every 30 minutes
 
 if (sb) {
   sb.auth.getSession()
