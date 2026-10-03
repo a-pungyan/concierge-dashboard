@@ -60,7 +60,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 "Clarity City", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.5 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 h1, h2 { line-height: 1.25; margin: 0; }
 h1 { font-size: 1.6rem; font-weight: 650; }
