@@ -1459,7 +1459,12 @@ function buildShiftNote(date, shift) {
       ...(l.description && l.actionTaken ? [labelled('Action:', l.actionTaken)] : []),
       ...pending(l, 'None.'),
     ]));
-  list(residents.length ? residents : [bullet([run('NA', 'b')])]);
+  // Each resident gets its own list with a blank line between, so entries are easy to scan.
+  if (!residents.length) list([bullet([run('NA', 'b')])]);
+  residents.forEach((item, i) => {
+    if (i) blank();
+    list([item]);
+  });
 
   heading('Amenities, Common Areas and Curb Appeal');
   const areas = new Map(); // entries for the same area share one bullet

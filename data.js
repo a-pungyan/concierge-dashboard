@@ -54,7 +54,8 @@ const WEATHER = {
 
 /* Suggestions for free-text fields (people can still type their own value). */
 const SUGGESTIONS = {
-  trackers: ['Snow Log', 'Live Event Tracker', 'Package Tracker', 'Key & Fob Tracker', 'Incident Tracker', 'Amenity Booking Tracker'],
+  // Same list as the "Trackers" card in the Overview sidebar (QUICK_ACCESS above).
+  trackers: QUICK_ACCESS.find((g) => g.title === 'Trackers').links.map((l) => l.name),
   vendors: ['White Rose', 'SPA'],
   areas: ['Curb Appeal', 'Ledbury Chutes', 'LIDO', 'Sky Lounge', 'STOA', 'Dining / Boardroom', 'Yoga Room', 'The Temple', 'North Court', 'Sports Lounge', 'Ski Simulator', 'F1 Simulator', 'Lobby', 'Elevators', 'Other Common Area'],
 };
@@ -79,7 +80,7 @@ const SECTIONS = [
     ask: 'What kind of Operations & Events update is this?',
     subtypes: [
       { id: 'logs_trackers', title: 'Logs & Trackers', fields: [
-        { name: 'unit', label: 'Log or tracker', required: true, list: 'tracker-list', placeholder: 'e.g. Snow Log' },
+        { name: 'unit', label: 'Log or tracker', required: true, list: 'tracker-list', placeholder: 'e.g. Guest Suite' },
         { name: 'actionTaken', label: 'Status / update', type: 'textarea', required: true, placeholder: 'e.g. No new snowfall was recorded during this shift.' },
         F.pending,
       ] },
