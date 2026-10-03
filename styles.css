@@ -400,15 +400,17 @@ dialog.login .btn-primary { margin-top: 4px; }
 .step-label { margin: 0 0 -6px; font-size: .78rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .step-section { font-weight: 650; color: var(--accent); }
 .stack-form { display: flex; flex-direction: column; gap: 12px; }
-.type-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-.type-cards .type-card:last-child { grid-column: 1 / -1; }
+.type-cards { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .type-card {
   display: block; position: relative; cursor: pointer; color: var(--text); font-weight: 400;
-  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  padding: 12px 40px 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
 }
 .type-card:hover { border-color: var(--accent); }
 .type-card input { position: absolute; opacity: 0; pointer-events: none; }
-.type-card:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-soft); padding: 11px 13px; }
+.type-card:has(input:checked) { border: 2px solid var(--accent); background: var(--accent-soft); padding: 11px 39px 11px 13px; }
+/* Arrow hints that choosing a card moves on to the next step. */
+.type-card::after { content: "›"; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 1.4rem; color: var(--muted); }
+.type-card:hover::after, .type-card:has(input:checked)::after { color: var(--accent); }
 .type-card:has(input:focus-visible) { box-shadow: var(--focus); }
 .type-card-title { display: block; font-weight: 650; font-size: .95rem; }
 .type-card-desc { display: block; font-size: .84rem; color: var(--muted); margin-top: 2px; }
@@ -422,8 +424,5 @@ dialog.login .btn-primary { margin-top: 4px; }
 .subtype-option:hover { border-color: var(--accent); }
 .subtype-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .subtype-option:has(input:focus-visible) { box-shadow: var(--focus); }
-@media (max-width: 720px) {
-  .type-cards { grid-template-columns: 1fr; }
-}
 #log-step2 { display: flex; flex-direction: column; gap: 14px; }
 #log-step2 .step-section { margin-bottom: -8px; }

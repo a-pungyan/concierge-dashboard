@@ -121,9 +121,9 @@ function dbErrorMessage(err) {
   if (/failed to fetch|networkerror|load failed/i.test(msg)) return 'Could not reach the database. Check your connection.';
   if ((err && err.code === '42501') || /row-level security|permission denied/i.test(msg)) return 'You do not have permission to do that (check the table policies in Supabase).';
   if ((err && err.code === 'PGRST204') || /could not find the .* column/i.test(msg)) {
-    return 'The database is missing the new shift log columns. Run the update SQL in the Supabase SQL Editor, then try again.';
+    return 'The database is missing the new shift log columns. Run the update SQL in the Supabase SQL Editor.';
   }
-  if (err && err.code === '23502') return 'The database still requires a field this log type does not use. Run the update SQL in the Supabase SQL Editor, then try again.';
+  if (err && err.code === '23502') return 'The database still requires a field this log type does not use. Run the update SQL in the Supabase SQL Editor.';
   if (err && err.code === 'PGRST116') return 'That record no longer exists or you do not have permission to change it.';
   if (/JWT|not authenticated/i.test(msg)) return 'Your session has expired. Sign out and sign in again.';
   return `Database error: ${msg}`;
@@ -879,7 +879,6 @@ function showLogStep(step) {
   $('#log-step1').hidden = step !== 1;
   $('#log-step2').hidden = step !== 2;
   $('#log-step-label').textContent = `Step ${step} of 2`;
-  $('#log-continue').hidden = step !== 1;
   $('#log-back').hidden = step !== 2;
   $('#log-save').hidden = step !== 2;
 }
@@ -905,9 +904,23 @@ function goToStep2() {
   first?.focus();
 }
 
-$('#log-sections').addEventListener('change', () => { $('#log-continue').disabled = !selectedSection(); });
-$('#log-sections').addEventListener('dblclick', (e) => { if (e.target.closest('.type-card')) goToStep2(); });
-$('#log-continue').addEventListener('click', goToStep2);
+/* Clicking a card goes straight to step 2. Only real pointer clicks on the card count
+   (detail > 0): arrow keys also fire "click" on the radios, so keyboard users can move
+   between cards and press Enter to continue. */
+$('#log-sections').addEventListener('click', (e) => {
+  const card = e.target.closest('.type-card');
+  if (!card || e.detail === 0 || e.target.matches('input')) return;
+  e.preventDefault(); // we select the radio ourselves, so the label doesn't need to
+  card.querySelector('input').checked = true;
+  goToStep2();
+});
+$('#log-sections').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('input[name="section"]')) {
+    e.preventDefault();
+    e.target.checked = true;
+    goToStep2();
+  }
+});
 $('#log-subtypes').addEventListener('change', () => {
   logSubtypePreset = $('input[name="subtype"]:checked', logForm)?.value || '';
   clearInvalid(logForm);
@@ -939,7 +952,6 @@ function openLogDialog(log, preset = {}) {
   syncLogFollowupFields();
   const section = (editing ? log.section : preset.section) || '';
   $$('input[name="section"]', logForm).forEach((r) => { r.checked = r.value === section; });
-  $('#log-continue').disabled = !section;
   logDialog.showModal();
   if (section) goToStep2();
   else { showLogStep(1); $('input[name="section"]', logForm).focus(); }
