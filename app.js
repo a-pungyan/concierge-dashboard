@@ -29,6 +29,17 @@ function normalize(d) {
 
 const localPart = (s) => ({ version: 1, followups: s.followups, resources: s.resources });
 
+/* Completed follow-ups are removed this many days after they were last updated.
+   Open follow-ups are kept until they are done. (Shift logs and notices are
+   cleaned up by a scheduled job in Supabase.) */
+const FOLLOWUP_RETENTION_DAYS = 30;
+
+function pruneFollowups(followups) {
+  const cutoff = Date.now() - FOLLOWUP_RETENTION_DAYS * 86400000;
+  // Date.parse gives NaN for missing dates, and NaN < cutoff is false, so those are kept.
+  return followups.filter((f) => f.status !== 'Done' || !(Date.parse(f.updatedAt || f.createdAt) < cutoff));
+}
+
 let state = loadState();
 
 function loadState() {
@@ -43,8 +54,10 @@ function loadState() {
     try {
       const parsed = JSON.parse(raw);
       const loaded = normalize(parsed);
+      const before = loaded.followups.length;
+      loaded.followups = pruneFollowups(loaded.followups);
       // Older versions kept (sample) shift logs and notices here; drop them.
-      if ('logs' in parsed || 'notices' in parsed) {
+      if ('logs' in parsed || 'notices' in parsed || loaded.followups.length !== before) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(loaded))); } catch (_) { /* ignore */ }
       }
       return loaded;
@@ -81,17 +94,25 @@ let cloudStatus = 'idle'; // idle | loading | ready | error
 let cloudError = '';
 let lastCloudLoad = 0;
 
-const logFromRow = (r) => ({
-  id: r.id, date: r.date, shift: r.shift, unit: r.unit, category: r.category,
-  actionTaken: r.action_taken, pendingAction: r.pending_action || '',
-  guestSuite: r.guest_suite || '', checkIn: r.check_in || '',
-  createdAt: r.created_at, updatedAt: r.updated_at,
-});
+function logFromRow(r) {
+  // Logs saved before sections existed only have a category.
+  const legacy = LEGACY_CATEGORY_SECTION[r.category];
+  const section = r.section || (legacy ? legacy[0] : 'residents_guests');
+  let subtype = r.subtype || (legacy ? legacy[1] : 'resident');
+  if (section === 'amenities_common_areas' && !subtype) subtype = slugify(r.unit) || 'other';
+  return {
+    id: r.id, date: r.date, shift: r.shift, section, subtype,
+    unit: r.unit || '', category: r.category || '', description: r.description || '',
+    actionTaken: r.action_taken || '', pendingAction: r.pending_action || '',
+    guestSuite: r.guest_suite || '', checkIn: r.check_in || '', details: r.details || {},
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
 const logToRow = (l) => ({
-  date: l.date, shift: l.shift, unit: l.unit, category: l.category,
-  action_taken: l.actionTaken, pending_action: l.pendingAction || null,
-  // Only sent for guest suites, so other logs still save if these columns haven't been added yet.
-  ...(l.category === 'Guest suite' ? { guest_suite: l.guestSuite || null, check_in: l.checkIn || null } : {}),
+  date: l.date, shift: l.shift, section: l.section, subtype: l.subtype,
+  unit: l.unit || null, category: l.category || null, description: l.description || null,
+  action_taken: l.actionTaken || null, pending_action: l.pendingAction || null,
+  guest_suite: l.guestSuite || null, check_in: l.checkIn || null, details: l.details || {},
 });
 const noticeFromRow = (r) => ({ id: r.id, text: r.text, date: r.date });
 
@@ -99,6 +120,10 @@ function dbErrorMessage(err) {
   const msg = (err && err.message) || String(err || '');
   if (/failed to fetch|networkerror|load failed/i.test(msg)) return 'Could not reach the database. Check your connection.';
   if ((err && err.code === '42501') || /row-level security|permission denied/i.test(msg)) return 'You do not have permission to do that (check the table policies in Supabase).';
+  if ((err && err.code === 'PGRST204') || /could not find the .* column/i.test(msg)) {
+    return 'The database is missing the new shift log columns. Run the update SQL in the Supabase SQL Editor, then try again.';
+  }
+  if (err && err.code === '23502') return 'The database still requires a field this log type does not use. Run the update SQL in the Supabase SQL Editor, then try again.';
   if (err && err.code === 'PGRST116') return 'That record no longer exists or you do not have permission to change it.';
   if (/JWT|not authenticated/i.test(msg)) return 'Your session has expired. Sign out and sign in again.';
   return `Database error: ${msg}`;
@@ -241,7 +266,16 @@ function matchesTerms(text, ts) {
   return ts.every((t) => hay.includes(t));
 }
 
-const logText = (l) => [l.unit, l.category, l.shift, l.actionTaken, l.pendingAction, l.date, fmtDate(l.date)].join(' ');
+const subtypeTitle = (l) => {
+  const sec = SECTION_BY_ID[l.section];
+  if (!sec || sec.subtypes.length === 1) return '';
+  return sec.subtypes.find((st) => st.id === l.subtype)?.title || '';
+};
+// Badge text, e.g. "Operations & Events · Vendor / Contractor" or "Residents & Guests · Package".
+const logTypeLabel = (l) => [SECTION_BY_ID[l.section]?.title, subtypeTitle(l) || (l.section === 'residents_guests' ? l.category : '')]
+  .filter(Boolean).join(' · ');
+const logText = (l) => [l.unit, logTypeLabel(l), l.shift, l.description, l.actionTaken, l.pendingAction, l.guestSuite,
+  ...Object.values(l.details || {}), l.date, fmtDate(l.date)].join(' ');
 const fuText = (f) => [f.title, f.unit, f.category, f.owner, f.assignee, f.priority, f.status, f.nextAction, f.resolution, f.dueDate].join(' ');
 const resText = (r) => [r.name, r.group, r.url, r.notes, r.tags].join(' ');
 const occName = (o) => [o.first_name, o.last_name].filter(Boolean).join(' ');
@@ -279,7 +313,7 @@ let occupants = [];
 
 const ui = {
   team: '',
-  logFilters: { q: '', category: '', shift: '', from: '', to: '' },
+  logFilters: { q: '', section: '', shift: '', from: '', to: '' },
   fuFilters: { q: '', owner: '', status: 'active', priority: '', category: '' },
   resQuery: '',
   searchQ: '',
@@ -344,17 +378,34 @@ function fuListItem(f, ts) {
     </li>`;
 }
 
+/* The labelled lines shown for a log, in reading order for its type. */
+function logLines(l) {
+  const d = l.details || {};
+  const lines = [];
+  if (l.guestSuite || l.checkIn) {
+    lines.push(['Guest suite', [l.guestSuite, l.checkIn && `check-in ${fmtDate(l.checkIn)}`].filter(Boolean).join(', ')]);
+  }
+  if (d.touchpoint) lines.push(['Touchpoint', d.touchpoint]);
+  if (d.gift) lines.push(['Gift', d.giftStatus ? `${d.gift} – ${d.giftStatus}` : d.gift]);
+  const descFirst = l.section === 'residents_guests' || l.section === 'amenities_common_areas';
+  const desc = l.description
+    ? [[l.section === 'amenities_common_areas' ? 'Status' : l.section === 'residents_guests' ? '' : 'Detail', l.description]] : [];
+  const action = l.actionTaken ? [[l.description && descFirst ? 'Action' : '', l.actionTaken]] : [];
+  return lines.concat(descFirst ? [...desc, ...action] : [...action, ...desc]);
+}
+
 function logItem(l, ts) {
+  const title = l.unit || subtypeTitle(l) || SECTION_BY_ID[l.section]?.title || 'Shift log';
   return `
     <article class="log">
       <div class="log-head">
-        <strong class="log-unit">${hl(l.unit, ts)}</strong>
-        <span class="badge cat">${hl(l.category, ts)}</span>
+        <strong class="log-unit">${hl(title, ts)}</strong>
+        <span class="badge cat">${hl(logTypeLabel(l), ts)}</span>
         <span class="muted">${esc(l.shift)} · ${esc(fmtDate(l.date))}</span>
         <span class="spacer"></span>
-        <button type="button" class="btn btn-sm btn-ghost" data-action="edit-log" data-id="${l.id}" aria-label="Edit log for ${esc(l.unit)}">Edit</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="edit-log" data-id="${l.id}" aria-label="Edit log: ${esc(title)}">Edit</button>
       </div>
-      <p>${hl(l.actionTaken, ts)}</p>
+      ${logLines(l).map(([label, text]) => `<p>${label ? `<strong>${esc(label)}:</strong> ` : ''}${hl(text, ts)}</p>`).join('')}
       ${l.pendingAction ? `<p class="pending"><strong>Pending:</strong> ${hl(l.pendingAction, ts)}</p>` : ''}
     </article>`;
 }
@@ -475,7 +526,7 @@ function filteredLogs() {
   const f = ui.logFilters;
   const ts = terms(f.q);
   return state.logs.filter((l) =>
-    (!f.category || l.category === f.category) &&
+    (!f.section || l.section === f.section) &&
     (!f.shift || l.shift === f.shift) &&
     (!f.from || l.date >= f.from) &&
     (!f.to || l.date <= f.to) &&
@@ -492,7 +543,7 @@ function viewLogs() {
     if (!groups.has(l.date)) groups.set(l.date, []);
     groups.get(l.date).push(l);
   });
-  const anyFilter = f.q || f.category || f.shift || f.from || f.to;
+  const anyFilter = f.q || f.section || f.shift || f.from || f.to;
 
   return `
     ${cloudBanner()}
@@ -506,7 +557,7 @@ function viewLogs() {
 
     <form class="filters" data-form="log-filters" aria-label="Filter shift logs">
       <label class="grow">Keyword or unit<input type="search" name="q" value="${esc(f.q)}" data-focus-key="log-q" placeholder="e.g. 807, leak, Rivera"></label>
-      <label>Category<select name="category" data-focus-key="log-cat">${optionList(OPTIONS.categories, f.category, 'All')}</select></label>
+      <label>Section<select name="section" data-focus-key="log-section"><option value="">All</option>${SECTIONS.map((sec) => `<option value="${sec.id}"${sec.id === f.section ? ' selected' : ''}>${esc(sec.title)}</option>`).join('')}</select></label>
       <label>Shift<select name="shift" data-focus-key="log-shift">${optionList(OPTIONS.shifts, f.shift, 'All')}</select></label>
       <label>From<input type="date" name="from" value="${esc(f.from)}" data-focus-key="log-from"></label>
       <label>To<input type="date" name="to" value="${esc(f.to)}" data-focus-key="log-to"></label>
@@ -769,58 +820,165 @@ function syncLogFollowupFields() {
 }
 logForm.elements.makeFollowup.addEventListener('change', syncLogFollowupFields);
 
-/* Relabels the form to match where the entry will appear in the shift note. */
-function applyCategoryHints() {
-  const category = logForm.elements.category.value;
-  const h = { ...CATEGORY_HINTS.default, ...(CATEGORY_HINTS[category] || {}) };
-  const setLabel = (name, text, placeholder) => {
-    const el = logForm.elements[name];
-    el.closest('label').firstChild.textContent = text;
-    el.placeholder = placeholder || '';
-  };
-  setLabel('unit', h.unit, h.unitPh);
-  setLabel('actionTaken', h.action, h.actionPh);
-  setLabel('pendingAction', h.pending, h.pendingPh);
-  $('#guest-suite-fields').hidden = category !== 'Guest suite';
-}
-logForm.elements.category.addEventListener('change', applyCategoryHints);
+/* Step 1 cards and the suggestion lists are built once from data.js. */
+$('#log-sections').innerHTML = SECTIONS.map((sec) => `
+  <label class="type-card">
+    <input type="radio" name="section" value="${sec.id}">
+    <span class="type-card-title">${esc(sec.title)}</span>
+    <span class="type-card-desc">${esc(sec.desc)}</span>
+    <span class="type-card-eg">e.g. ${esc(sec.examples.slice(0, 3).join(' · '))}</span>
+  </label>`).join('');
+[['tracker-list', SUGGESTIONS.trackers], ['vendor-list', SUGGESTIONS.vendors], ['area-list', SUGGESTIONS.areas]].forEach(([id, values]) => {
+  $(`#${id}`).innerHTML = values.map((v) => `<option value="${esc(v)}"></option>`).join('');
+});
 
-function openLogDialog(log) {
+let logStep = 1;
+let logDraft = {};          // field values kept while moving between steps and subtypes
+let logSubtypePreset = '';  // subtype to pre-select when editing
+
+const selectedSection = () => SECTION_BY_ID[$('input[name="section"]:checked', logForm)?.value];
+
+function currentSubtypeDef() {
+  const sec = selectedSection();
+  if (!sec) return null;
+  if (sec.subtypes.length === 1) return sec.subtypes[0];
+  const id = $('input[name="subtype"]:checked', logForm)?.value;
+  return sec.subtypes.find((st) => st.id === id) || null;
+}
+
+function fieldHtml(f) {
+  const req = f.required ? ' required' : '';
+  const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+  let control;
+  if (f.type === 'textarea') control = `<textarea name="${f.name}" rows="${f.rows || 3}"${ph}${req}></textarea>`;
+  else if (f.type === 'select') control = `<select name="${f.name}"${req}>${f.required ? '<option value="">Choose…</option>' : ''}${optionList(f.options)}</select>`;
+  else if (f.type === 'date') control = `<input type="date" name="${f.name}"${req}>`;
+  else control = `<input name="${f.name}"${f.list ? ` list="${f.list}"` : ''}${ph} autocomplete="off"${req}>`;
+  return `<label>${esc(f.label)}${control}</label>`;
+}
+
+function saveDraft() {
+  $$('#log-dynamic [name]').forEach((el) => { logDraft[el.name] = el.value; });
+}
+
+function renderLogFields() {
+  saveDraft();
+  const def = currentSubtypeDef();
+  $('#log-fields').hidden = !def;
+  $('#log-dynamic').innerHTML = def ? def.fields.map(fieldHtml).join('') : '';
+  if (!def) return;
+  def.fields.forEach((f) => {
+    const el = logForm.elements[f.name];
+    if (el && logDraft[f.name] != null) el.value = logDraft[f.name];
+  });
+  if (logForm.elements.category && !logForm.elements.category.value) logForm.elements.category.value = 'General';
+}
+
+function showLogStep(step) {
+  logStep = step;
+  $('#log-step1').hidden = step !== 1;
+  $('#log-step2').hidden = step !== 2;
+  $('#log-step-label').textContent = `Step ${step} of 2`;
+  $('#log-continue').hidden = step !== 1;
+  $('#log-back').hidden = step !== 2;
+  $('#log-save').hidden = step !== 2;
+}
+
+function goToStep2() {
+  const sec = selectedSection();
+  if (!sec) return;
+  clearInvalid(logForm);
+  showLogStep(2);
+  $('#log-section-name').textContent = sec.title;
+  const multi = sec.subtypes.length > 1;
+  $('#log-subtype').hidden = !multi;
+  if (multi) {
+    const preset = sec.subtypes.some((st) => st.id === logSubtypePreset) ? logSubtypePreset : '';
+    $('#log-subtype-q').textContent = sec.ask;
+    $('#log-subtypes').innerHTML = sec.subtypes.map((st) => `
+      <label class="subtype-option"><input type="radio" name="subtype" value="${st.id}"${st.id === preset ? ' checked' : ''}>${esc(st.title)}</label>`).join('');
+  } else {
+    $('#log-subtypes').innerHTML = '';
+  }
+  renderLogFields();
+  const first = multi && !currentSubtypeDef() ? $('input[name="subtype"]', logForm) : $('#log-dynamic [name]');
+  first?.focus();
+}
+
+$('#log-sections').addEventListener('change', () => { $('#log-continue').disabled = !selectedSection(); });
+$('#log-sections').addEventListener('dblclick', (e) => { if (e.target.closest('.type-card')) goToStep2(); });
+$('#log-continue').addEventListener('click', goToStep2);
+$('#log-subtypes').addEventListener('change', () => {
+  logSubtypePreset = $('input[name="subtype"]:checked', logForm)?.value || '';
+  clearInvalid(logForm);
+  renderLogFields();
+  $('#log-dynamic [name]')?.focus();
+});
+$('#log-back').addEventListener('click', () => {
+  saveDraft();
+  clearInvalid(logForm);
+  showLogStep(1);
+  ($('input[name="section"]:checked', logForm) || $('input[name="section"]', logForm)).focus();
+});
+
+/* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }. */
+function openLogDialog(log, preset = {}) {
   logForm.reset();
   clearInvalid(logForm);
+  $('#log-dynamic').innerHTML = ''; // drop the previous log's fields so they aren't saved into the draft
   const editing = !!log;
+  logDraft = editing ? { ...log, ...(log.details || {}) } : { ...preset };
+  logSubtypePreset = (editing ? log.subtype : preset.subtype) || '';
   $('#log-dialog-title').textContent = editing ? 'Edit shift log' : 'New shift log';
   $('[data-action="delete"]', logForm).hidden = !editing;
   $('#log-followup-fields').hidden = editing;
-  setFormValues(logForm, log || {
-    id: '', date: today(), shift: currentShift(), unit: '', category: 'General', actionTaken: '', pendingAction: '', guestSuite: '', checkIn: '',
+  setFormValues(logForm, {
+    id: editing ? log.id : '', date: editing ? log.date : today(), shift: editing ? log.shift : currentShift(),
     makeFollowup: false, fuOwner: 'Concierge', fuDue: dayOffset(1), fuPriority: 'Medium',
   });
   syncLogFollowupFields();
-  applyCategoryHints();
+  const section = (editing ? log.section : preset.section) || '';
+  $$('input[name="section"]', logForm).forEach((r) => { r.checked = r.value === section; });
+  $('#log-continue').disabled = !section;
   logDialog.showModal();
-  logForm.elements.unit.focus();
+  if (section) goToStep2();
+  else { showLogStep(1); $('input[name="section"]', logForm).focus(); }
 }
 
 logForm.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (logStep === 1) return goToStep2(); // Enter on step 1 means Continue
   clearInvalid(logForm);
-  if (!requireFields(logForm, ['date', 'unit', 'actionTaken'])) return;
+  const sec = selectedSection();
+  const def = currentSubtypeDef();
+  if (!def) {
+    showFormError(logForm, 'Choose what kind of update this is.');
+    $('input[name="subtype"]', logForm)?.focus();
+    return;
+  }
+  if (!requireFields(logForm, ['date', ...def.fields.filter((f) => f.required).map((f) => f.name)])) return;
   const v = Object.fromEntries(new FormData(logForm));
+  const val = (n) => String(v[n] ?? '').trim();
   const makeFu = !v.id && logForm.elements.makeFollowup.checked;
-  if (makeFu && !v.pendingAction.trim()) {
+  if (makeFu && !val('pendingAction')) {
     logForm.elements.pendingAction.setAttribute('aria-invalid', 'true');
     logForm.elements.pendingAction.focus();
     showFormError(logForm, 'Add a pending action to create a follow-up from it.');
     return;
   }
   const now = new Date().toISOString();
+  const details = {};
+  ['touchpoint', 'gift', 'giftStatus'].forEach((k) => { if (val(k)) details[k] = val(k); });
   const rec = {
-    date: v.date, shift: v.shift, unit: v.unit.trim(), category: v.category,
-    actionTaken: v.actionTaken.trim(), pendingAction: v.pendingAction.trim(),
-    guestSuite: v.guestSuite.trim(), checkIn: v.checkIn,
+    date: v.date, shift: v.shift, section: sec.id,
+    // Amenities are sub-typed by area (e.g. "curb_appeal"); other sections by the chosen subtype.
+    subtype: sec.id === 'amenities_common_areas' ? (slugify(val('unit')) || 'other') : def.id,
+    unit: val('unit'),
+    category: sec.id === 'residents_guests' ? (v.category || 'General') : (sec.subtypes.length > 1 ? def.title : sec.title),
+    description: val('description'), actionTaken: val('actionTaken'), pendingAction: val('pendingAction'),
+    guestSuite: val('guestSuite'), checkIn: v.checkIn || '', details,
   };
-  const btn = $('button[type="submit"]', logForm);
+  const btn = $('#log-save');
   setBusy(btn, true, 'Saving…');
   const res = await db(() => (v.id
     ? sb.from('shift_logs').update({ ...logToRow(rec), updated_at: now }).eq('id', v.id).select().single()
@@ -836,9 +994,10 @@ logForm.addEventListener('submit', async (e) => {
   if (makeFu) {
     const r = commit((s) => {
       s.followups.push({
-        id: uid(), title: rec.pendingAction, unit: rec.unit, category: rec.category, owner: v.fuOwner, assignee: '',
-        dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority, status: 'Open', nextAction: '', resolution: '',
-        createdAt: now, updatedAt: now,
+        id: uid(), title: rec.pendingAction, unit: rec.unit,
+        category: OPTIONS.categories.includes(rec.category) ? rec.category : 'General',
+        owner: v.fuOwner, assignee: '', dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority,
+        status: 'Open', nextAction: '', resolution: '', createdAt: now, updatedAt: now,
       });
     });
     if (!r.ok) fuProblem = r.error;
@@ -972,11 +1131,6 @@ const noteDialog = $('#note-dialog');
 /* The note is built as structured blocks (paragraphs, headings, nested bullets with
    bold/underlined runs) so it can be rendered as formatted HTML for Outlook and as plain text. */
 
-const NOTE_SECTION = {
-  'Logs and trackers': 'logs', 'Vendor / contractor': 'vendors', 'Guest suite': 'guests', Event: 'events',
-  'Resident touchpoint': 'touchpoints', 'Fitz gift': 'fitz', 'Amenity / common area': 'amenities',
-};
-
 const run = (text, fmt = '') => ({ text, b: fmt.includes('b'), u: fmt.includes('u') });
 const bullet = (runs, children = []) => ({ runs, children });
 // Resident suggestions used to be "E02 — Dana Fox"; the note uses "E02 Dana Fox".
@@ -986,7 +1140,7 @@ function buildShiftNote(date, shift) {
   const logs = state.logs
     .filter((l) => l.date === date && (!shift || l.shift === shift))
     .sort((a, b) => (SHIFT_RANK[a.shift] ?? 0) - (SHIFT_RANK[b.shift] ?? 0) || (a.createdAt || '').localeCompare(b.createdAt || ''));
-  const section = (key) => logs.filter((l) => (NOTE_SECTION[l.category] || 'residents') === key);
+  const entries = (section, subtype) => logs.filter((l) => l.section === section && (!subtype || l.subtype === subtype));
 
   const blocks = [];
   const para = (...runs) => blocks.push({ type: 'p', runs });
@@ -994,59 +1148,97 @@ function buildShiftNote(date, shift) {
   const heading = (text) => { blank(); para(run(text, 'bu')); };
   const list = (items) => blocks.push({ type: 'list', items });
 
-  const pending = (l, ifEmpty) => (l.pendingAction || ifEmpty
-    ? [bullet([run('Pending:', 'b'), run(` ${l.pendingAction || ifEmpty}`)])] : []);
+  const labelled = (label, text) => bullet([run(label, 'b'), run(` ${text}`)]);
+  const pending = (l, ifEmpty) => (l.pendingAction || ifEmpty ? [labelled('Pending:', l.pendingAction || ifEmpty)] : []);
   const category = (label, children) => (children.length
     ? bullet([run(label, 'b')], children)
     : bullet([run(label, 'b'), run(' NA', 'b')]));
-  const resident = (l, pendingIfEmpty) =>
-    bullet([run(`${who(l.unit)}:`, 'b'), run(` ${l.actionTaken}`)], pending(l, pendingIfEmpty));
   const vendorLine = (l) => {
     const name = who(l.unit);
-    return !name || l.actionTaken.toLowerCase().startsWith(name.toLowerCase()) ? l.actionTaken : `${name} – ${l.actionTaken}`;
+    const text = l.actionTaken;
+    if (!name || text.toLowerCase().startsWith(name.toLowerCase())) return text;
+    // "White Rose" + "On site for cleaning." -> "White Rose on site for cleaning."
+    return `${name} ${/^[A-Z][a-z]/.test(text) ? text[0].toLowerCase() + text.slice(1) : text}`;
   };
 
   para(run('Hi Team,'));
   blank();
   para(run(`Please see the shift notes for ${SHIFT_NOTE.property}.`));
 
+  /* Operations and Events: the four standard subsections, then any general operations updates. */
   heading('Operations and Events');
+  const ops = 'operations_events';
   list([
-    category('Logs and Trackers:', section('logs').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
-    category('Vendors/Contractors:', section('vendors').map((l) =>
-      bullet([run(vendorLine(l))], l.pendingAction ? [bullet([run(l.pendingAction)])] : []))),
-    category('Guest Suite(s):', section('guests').map((l) =>
+    category('Logs and Trackers:', entries(ops, 'logs_trackers').map((l) =>
+      bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
+    category('Vendors/Contractors:', entries(ops, 'vendor_contractor').map((l) =>
+      bullet([run(vendorLine(l))], [...(l.description ? [bullet([run(l.description)])] : []), ...pending(l)]))),
+    category('Guest Suite(s):', entries(ops, 'guest_suite').map((l) =>
       bullet([run(`Upcoming Check-in${l.checkIn ? ` – ${fmtDate(l.checkIn, { month: 'long', day: 'numeric' })}` : ''}:`)], [
         bullet([run(`Booked by: ${who(l.unit)}`)]),
         ...(l.guestSuite ? [bullet([run(`Guest Suite: ${l.guestSuite}`)])] : []),
         bullet([run(l.actionTaken)]),
         ...pending(l),
       ]))),
-    category('Event(s):', section('events').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
+    category('Event(s):', entries(ops, 'event').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
+    ...entries(ops, 'general_operations').map((l) => bullet([run(l.actionTaken)], pending(l))),
   ]);
 
   heading('Resident Experience (Completed and Upcoming 120 Days of Resident Touchpoints)');
-  const touchpoints = section('touchpoints');
-  list(touchpoints.length ? touchpoints.map((l) => resident(l)) : [bullet([run('No calls made tonight, will resume tomorrow.', 'b')])]);
+  const experience = entries('resident_experience').map((l) => {
+    if (l.subtype !== 'resident_touchpoint') return bullet([run(l.actionTaken)], pending(l));
+    const t = l.details?.touchpoint;
+    return bullet([run(`${who(l.unit)}:`, 'b'), run(` ${t && t !== 'Other' ? `${t} touchpoint – ` : ''}${l.actionTaken}`)], pending(l));
+  });
+  list(experience.length ? experience : [bullet([run('No calls made tonight, will resume tomorrow.', 'b')])]);
 
   heading('Fitz Gifts:');
-  const fitz = section('fitz');
-  list(fitz.length ? fitz.map((l) => resident(l)) : [bullet([run('NA', 'b')])]);
+  const gifts = entries('fitz_gifts').map((l) => {
+    const d = l.details || {};
+    const gift = d.gift ? `${d.gift}${d.giftStatus ? ` – ${d.giftStatus}` : ''}.` : '';
+    return bullet([run(`${who(l.unit)}:`, 'b'), run(` ${[gift, l.actionTaken].filter(Boolean).join(' ')}`)], pending(l));
+  });
+  list(gifts.length ? gifts : [bullet([run('NA', 'b')])]);
 
   heading('Residents and Guests');
-  const residents = section('residents');
-  list(residents.length ? residents.map((l) => resident(l, 'None.')) : [bullet([run('NA', 'b')])]);
+  const residents = entries('residents_guests').map((l) =>
+    bullet([run(`${who(l.unit)}:`, 'b'), run(` ${l.description || l.actionTaken}`)], [
+      ...(l.description && l.actionTaken ? [labelled('Action:', l.actionTaken)] : []),
+      ...pending(l, 'None.'),
+    ]));
+  list(residents.length ? residents : [bullet([run('NA', 'b')])]);
 
   heading('Amenities, Common Areas and Curb Appeal');
-  const places = new Map(); // group entries for the same location under one bullet
-  section('amenities').forEach((l) => {
+  const areas = new Map(); // entries for the same area share one bullet
+  entries('amenities_common_areas').forEach((l) => {
     const name = who(l.unit);
     const key = name.toLowerCase();
-    if (!places.has(key)) places.set(key, bullet([run(`${name}:`, 'b')]));
-    places.get(key).children.push(bullet([run('Concern:', 'b'), run(` ${l.actionTaken}`)]));
-    if (l.pendingAction) places.get(key).children.push(bullet([run('To-Do:', 'b'), run(` ${l.pendingAction}`)]));
+    if (!areas.has(key)) areas.set(key, bullet([run(`${name}:`, 'b')]));
+    const children = areas.get(key).children;
+    if (l.description) {
+      children.push(labelled('Status:', l.description));
+      if (l.actionTaken) children.push(labelled('Action:', l.actionTaken));
+    } else if (l.actionTaken) {
+      children.push(labelled('Concern:', l.actionTaken)); // logs saved before the Status field existed
+    }
+    if (l.pendingAction) children.push(labelled('To-Do:', l.pendingAction));
   });
-  list([...places.values(), bullet([run('All other amenities in good condition.')])]);
+  list([...areas.values(), bullet([run('All other amenities in good condition.')])]);
+
+  // Open follow-ups, grouped by the team that owns them.
+  heading('Outstanding Follow-ups');
+  const open = sortFollowups(state.followups.filter((f) => f.status !== 'Done'));
+  const teams = OPTIONS.teams
+    .map((team) => [team, open.filter((f) => f.owner === team)])
+    .filter(([, items]) => items.length)
+    .map(([team, items]) => bullet([run(`${team}:`, 'b')], items.map((f) => {
+      const when = isOverdue(f) ? `Overdue – was due ${fmtDate(f.dueDate, { month: 'long', day: 'numeric' })}`
+        : f.dueDate === today() ? 'Due today'
+        : `Due ${fmtDate(f.dueDate, { month: 'long', day: 'numeric' })}`;
+      return bullet([run(`${f.unit ? `${who(f.unit)} – ` : ''}${f.title} (${when}${f.priority === 'High' ? ', high priority' : ''})`)],
+        f.nextAction ? [bullet([run('Next:', 'b'), run(` ${f.nextAction}`)])] : []);
+    })));
+  list(teams.length ? teams : [bullet([run('NA', 'b')])]);
 
   blank();
   para(run('Kind Regards,'));
@@ -1339,9 +1531,8 @@ main.addEventListener('click', (e) => {
   switch (el.dataset.action) {
     case 'new-log': return openLogDialog();
     case 'new-log-for':
-      openLogDialog();
-      logForm.elements.unit.value = el.dataset.unit;
-      return logForm.elements.actionTaken.focus();
+      openLogDialog(null, { section: 'residents_guests', unit: el.dataset.unit });
+      return logForm.elements.description?.focus();
     case 'new-fu-for':
       openFuDialog();
       fuForm.elements.unit.value = el.dataset.unit;
@@ -1380,7 +1571,7 @@ main.addEventListener('click', (e) => {
     }
     case 'retry-cloud': return loadCloud();
     case 'clear-log-filters':
-      ui.logFilters = { q: '', category: '', shift: '', from: '', to: '' };
+      ui.logFilters = { q: '', section: '', shift: '', from: '', to: '' };
       return render();
     case 'clear-fu-filters':
       ui.fuFilters = { q: '', owner: '', status: 'active', priority: '', category: '' };

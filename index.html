@@ -37,45 +37,56 @@
 
   <div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
 
-  <!-- Shift log dialog -->
+  <!-- Shift log dialog: step 1 picks the shift-note section, step 2 shows that type's form -->
   <dialog id="log-dialog" aria-labelledby="log-dialog-title">
     <form id="log-form" method="dialog" novalidate>
-      <h2 id="log-dialog-title">New log</h2>
+      <p class="step-label" id="log-step-label">Step 1 of 2</p>
+      <h2 id="log-dialog-title">New shift log</h2>
       <input type="hidden" name="id">
-      <div class="grid-2">
-        <label>Date<input type="date" name="date" required></label>
-        <label>Shift
-          <select name="shift">
-            <option>Morning</option><option>Afternoon</option><option>Overnight</option>
-          </select>
-        </label>
-        <label>Unit or name<input name="unit" list="occupant-list" required placeholder="Type a unit or resident name" autocomplete="off"></label>
-        <label>Category<select name="category" data-options="categories"></select></label>
-      </div>
-      <div class="grid-2" id="guest-suite-fields" hidden>
-        <label>Guest suite<input name="guestSuite" placeholder="e.g. E511" autocomplete="off"></label>
-        <label>Check-in date<input type="date" name="checkIn"></label>
-      </div>
-      <label>Action taken<textarea name="actionTaken" rows="3" required placeholder="What happened and what you did"></textarea></label>
-      <label>Pending action<textarea name="pendingAction" rows="2" placeholder="Leave blank if nothing is pending"></textarea></label>
 
-      <fieldset class="followup-inline" id="log-followup-fields">
-        <legend>
-          <label class="check"><input type="checkbox" name="makeFollowup"> Create a follow-up from the pending action</label>
-        </legend>
-        <div class="grid-3">
-          <label>Owner<select name="fuOwner" data-options="teams"></select></label>
-          <label>Due date<input type="date" name="fuDue"></label>
-          <label>Priority<select name="fuPriority" data-options="priorities"></select></label>
+      <div id="log-step1">
+        <p id="log-step1-q">What type of update are you logging?</p>
+        <div class="type-cards" role="radiogroup" aria-labelledby="log-step1-q" id="log-sections"></div>
+      </div>
+
+      <div id="log-step2" hidden>
+        <p class="step-section" id="log-section-name"></p>
+        <div id="log-subtype" hidden>
+          <p id="log-subtype-q"></p>
+          <div class="subtype-options" role="radiogroup" aria-labelledby="log-subtype-q" id="log-subtypes"></div>
         </div>
-      </fieldset>
+        <div id="log-fields" class="stack-form" hidden>
+          <div class="grid-2">
+            <label>Date<input type="date" name="date" required></label>
+            <label>Shift
+              <select name="shift">
+                <option>Morning</option><option>Afternoon</option><option>Overnight</option>
+              </select>
+            </label>
+          </div>
+          <div id="log-dynamic" class="stack-form"></div>
+
+          <fieldset class="followup-inline" id="log-followup-fields">
+            <legend>
+              <label class="check"><input type="checkbox" name="makeFollowup"> Create a follow-up from the pending action</label>
+            </legend>
+            <div class="grid-3">
+              <label>Owner<select name="fuOwner" data-options="teams"></select></label>
+              <label>Due date<input type="date" name="fuDue"></label>
+              <label>Priority<select name="fuPriority" data-options="priorities"></select></label>
+            </div>
+          </fieldset>
+        </div>
+      </div>
 
       <p class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-danger-ghost" data-action="delete" hidden>Delete</button>
+        <button type="button" class="btn btn-ghost" id="log-back" hidden>Back</button>
         <span class="spacer"></span>
         <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save log</button>
+        <button type="button" class="btn btn-primary" id="log-continue" disabled>Continue</button>
+        <button type="submit" class="btn btn-primary" id="log-save" hidden>Save log</button>
       </div>
     </form>
   </dialog>
@@ -185,6 +196,9 @@
 
   <!-- Resident suggestions for the "Unit or name" inputs; filled from Supabase after sign-in -->
   <datalist id="occupant-list"></datalist>
+  <datalist id="tracker-list"></datalist>
+  <datalist id="vendor-list"></datalist>
+  <datalist id="area-list"></datalist>
 
   <!-- Login dialog (opens automatically when signed out; cannot be dismissed) -->
   <dialog id="login-dialog" class="login" aria-labelledby="login-title">
