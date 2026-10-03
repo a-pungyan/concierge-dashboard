@@ -13,36 +13,28 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 /* ---------- Storage ---------- */
 
-/* Follow-ups and each person's pinned resources are saved in this browser. Shift logs,
-   notices and resources live in Supabase (shared by the team): they are held in
-   state.logs / state.notices / state.resources while signed in, but never written to
-   browser storage. legacyResources is the list older versions kept in the browser,
-   kept until the admin copies it to Supabase or discards it. */
+/* Shift logs, follow-ups, notices and resources live in Supabase (shared by the team).
+   They are held in state while signed in but never written to browser storage. The browser
+   keeps only each person's pinned resources, plus any follow-ups/resources that older
+   versions stored locally (legacyFollowups / legacyResources) until they are copied to
+   Supabase or discarded. */
+
+const asList = (v) => (Array.isArray(v) ? v : []);
 
 function normalize(d) {
   return {
     version: 1,
     logs: [],
-    followups: Array.isArray(d.followups) ? d.followups : [],
+    followups: [],
     notices: [],
     resources: [],
-    pins: Array.isArray(d.pins) ? d.pins : [],
-    legacyResources: Array.isArray(d.legacyResources) ? d.legacyResources : Array.isArray(d.resources) ? d.resources : [],
+    pins: asList(d.pins),
+    legacyFollowups: Array.isArray(d.legacyFollowups) ? d.legacyFollowups : asList(d.followups),
+    legacyResources: Array.isArray(d.legacyResources) ? d.legacyResources : asList(d.resources),
   };
 }
 
-const localPart = (s) => ({ version: 1, followups: s.followups, pins: s.pins, legacyResources: s.legacyResources });
-
-/* Completed follow-ups are removed this many days after they were last updated.
-   Open follow-ups are kept until they are done. (Shift logs and notices are
-   cleaned up by a scheduled job in Supabase.) */
-const FOLLOWUP_RETENTION_DAYS = 30;
-
-function pruneFollowups(followups) {
-  const cutoff = Date.now() - FOLLOWUP_RETENTION_DAYS * 86400000;
-  // Date.parse gives NaN for missing dates, and NaN < cutoff is false, so those are kept.
-  return followups.filter((f) => f.status !== 'Done' || !(Date.parse(f.updatedAt || f.createdAt) < cutoff));
-}
+const localPart = (s) => ({ version: 1, pins: s.pins, legacyFollowups: s.legacyFollowups, legacyResources: s.legacyResources });
 
 let state = loadState();
 
@@ -51,29 +43,24 @@ function loadState() {
   try {
     raw = localStorage.getItem(STORAGE_KEY);
   } catch (e) {
-    queueMicrotask(() => toast('Browser storage is unavailable. Changes will not be saved after you close this tab.', 'error'));
-    return normalize(sampleData());
+    queueMicrotask(() => toast('Browser storage is unavailable, so pinned resources will not be remembered.', 'error'));
+    return normalize({});
   }
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      const loaded = normalize(parsed);
-      const before = loaded.followups.length;
-      loaded.followups = pruneFollowups(loaded.followups);
-      // Older versions kept shift logs, notices and resources here; rewrite in the current shape.
-      if ('logs' in parsed || 'notices' in parsed || 'resources' in parsed || loaded.followups.length !== before) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(loaded))); } catch (_) { /* ignore */ }
-      }
-      return loaded;
-    } catch (e) {
-      // Keep the unreadable data rather than overwriting it.
-      try { localStorage.setItem(STORAGE_KEY + ':unreadable-backup', raw); } catch (_) { /* ignore */ }
-      queueMicrotask(() => toast('Saved data could not be read. A backup copy was kept; sample data loaded.', 'error'));
+  if (!raw) return normalize({});
+  try {
+    const parsed = JSON.parse(raw);
+    const loaded = normalize(parsed);
+    // Older versions stored shared data here; rewrite in the current shape.
+    if (['logs', 'notices', 'resources', 'followups'].some((k) => k in parsed)) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(loaded))); } catch (_) { /* ignore */ }
     }
+    return loaded;
+  } catch (e) {
+    // Keep the unreadable data rather than overwriting it.
+    try { localStorage.setItem(STORAGE_KEY + ':unreadable-backup', raw); } catch (_) { /* ignore */ }
+    queueMicrotask(() => toast('Saved browser data could not be read. A backup copy was kept.', 'error'));
+    return normalize({});
   }
-  const seeded = normalize(sampleData());
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localPart(seeded))); } catch (_) { /* reported on first save */ }
-  return seeded;
 }
 
 /* Applies a change to a copy of the state and saves it. The live state only
@@ -109,6 +96,7 @@ function logFromRow(r) {
     unit: r.unit || '', category: r.category || '', description: r.description || '',
     actionTaken: r.action_taken || '', pendingAction: r.pending_action || '',
     guestSuite: r.guest_suite || '', checkIn: r.check_in || '', details: r.details || {},
+    createdBy: r.created_by || '', author: r.created_by_email || '',
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -126,6 +114,10 @@ function dbErrorMessage(err) {
   if ((err && err.code === '42501') || /row-level security|permission denied/i.test(msg)) return 'You do not have permission to do that (check the table policies in Supabase).';
   if ((err && err.code === 'PGRST204') || /could not find the .* column/i.test(msg)) {
     return 'The database is missing the new shift log columns. Run the update SQL in the Supabase SQL Editor.';
+  }
+  if ((err && err.code === 'PGRST205') || /could not find the table/i.test(msg)) {
+    const table = (msg.match(/'public\.([\w]+)'/) || [])[1];
+    return `The database is missing the ${table ? `"${table}" ` : ''}table. Run its setup SQL in the Supabase SQL Editor.`;
   }
   if (err && err.code === '23502') return 'The database still requires a field this log type does not use. Run the update SQL in the Supabase SQL Editor.';
   if (err && err.code === 'PGRST116') return 'That record no longer exists or you do not have permission to change it.';
@@ -181,9 +173,90 @@ function clearCloud() {
   state.logs = [];
   state.notices = [];
   state.resources = [];
+  state.followups = [];
   cloudStatus = 'idle';
   resourcesStatus = 'idle';
+  fuStatus = 'idle';
   isAdmin = false;
+  currentUser = null;
+}
+
+/* ----- Who is signed in, and what they may change ----- */
+
+let currentUser = null; // { id, email }
+
+// Only the author (or an admin) can edit or delete a shift log; Supabase enforces the same rule.
+const canEditLog = (l) => isAdmin || (!!currentUser && l.createdBy === currentUser.id);
+const canDeleteFollowup = (f) => isAdmin || (!!currentUser && f.createdBy === currentUser.id);
+const authorLabel = (email, id) => {
+  if (currentUser && id && id === currentUser.id) return 'you';
+  return email ? email.split('@')[0] : 'unknown';
+};
+
+/* ----- Shared follow-ups: everyone signed in can view, add and update them. ----- */
+
+let fuStatus = 'idle'; // idle | loading | ready | error
+let fuError = '';
+
+const fuFromRow = (r) => ({
+  id: r.id, title: r.title, unit: r.unit || '', category: r.category || 'General', owner: r.owner || 'Concierge',
+  assignee: r.assignee || '', dueDate: r.due_date || '', priority: r.priority || 'Medium', status: r.status || 'Open',
+  nextAction: r.next_action || '', resolution: r.resolution || '',
+  createdBy: r.created_by || '', author: r.created_by_email || '', createdAt: r.created_at, updatedAt: r.updated_at,
+});
+const fuToRow = (f) => ({
+  title: f.title, unit: f.unit || null, category: f.category || 'General', owner: f.owner || 'Concierge',
+  assignee: f.assignee || null, due_date: f.dueDate, priority: f.priority || 'Medium', status: f.status || 'Open',
+  next_action: f.nextAction || null, resolution: f.resolution || null,
+});
+
+async function loadFollowups({ quiet = false } = {}) {
+  if (!sb) return;
+  if (!quiet) fuStatus = 'loading';
+  try {
+    state.followups = (await fetchAll('followups')).map(fuFromRow);
+    fuStatus = 'ready';
+  } catch (err) {
+    console.error(err);
+    if (quiet) return;
+    fuStatus = 'error';
+    fuError = dbErrorMessage(err);
+  }
+  if (!document.querySelector('dialog[open]:not(#login-dialog)')) render();
+}
+
+function followupBanner() {
+  if (fuStatus === 'loading') return '<p class="banner">Loading follow-ups…</p>';
+  if (fuStatus === 'error') {
+    return `<div class="banner banner-error" role="alert">Could not load follow-ups. ${esc(fuError)}
+      <button type="button" class="btn btn-sm" data-action="retry-fu">Try again</button></div>`;
+  }
+  const n = state.legacyFollowups.length;
+  if (fuStatus === 'ready' && n) {
+    return `<div class="banner">${n} follow-up${n === 1 ? ' is' : 's are'} saved only in this browser from before.
+      Copy ${n === 1 ? 'it' : 'them'} to the shared list so the team can see ${n === 1 ? 'it' : 'them'}, or discard ${n === 1 ? 'it' : 'them'} if ${n === 1 ? "it's" : "they're"} sample data.
+      <button type="button" class="btn btn-sm" data-action="upload-legacy-fu">Copy to shared list</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-action="discard-legacy-fu">Discard</button></div>`;
+  }
+  return '';
+}
+
+/* One-time move of follow-ups that older versions kept in this browser. */
+async function uploadLegacyFollowups(btn) {
+  const rows = state.legacyFollowups.filter((f) => f.title).map((f) => fuToRow({
+    ...f,
+    dueDate: f.dueDate || today(),
+    priority: OPTIONS.priorities.includes(f.priority) ? f.priority : 'Medium',
+    status: OPTIONS.statuses.includes(f.status) ? f.status : 'Open',
+  }));
+  setBusy(btn, true, 'Copying…');
+  const res = rows.length ? await db(() => sb.from('followups').insert(rows).select()) : { ok: true, data: [] };
+  setBusy(btn, false);
+  if (!res.ok) return toast(`${res.error} Nothing was copied.`, 'error');
+  state.followups.push(...res.data.map(fuFromRow));
+  const r = commit((st) => { st.legacyFollowups = []; });
+  if (!r.ok) toast(r.error, 'error');
+  toast(`Copied ${res.data.length} follow-up${res.data.length === 1 ? '' : 's'} to the shared list.`);
 }
 
 /* ----- Shared resources: everyone signed in can read them; only admins can change them. ----- */
@@ -444,9 +517,9 @@ function logItem(l, ts) {
       <div class="log-head">
         <strong class="log-unit">${hl(title, ts)}</strong>
         <span class="badge cat">${hl(logTypeLabel(l), ts)}</span>
-        <span class="muted">${esc(l.shift)} · ${esc(fmtDate(l.date))}</span>
+        <span class="muted">${esc(l.shift)} · ${esc(fmtDate(l.date))} · <span title="${esc(l.author)}">by ${esc(authorLabel(l.author, l.createdBy))}</span></span>
         <span class="spacer"></span>
-        <button type="button" class="btn btn-sm btn-ghost" data-action="edit-log" data-id="${l.id}" aria-label="Edit log: ${esc(title)}">Edit</button>
+        ${canEditLog(l) ? `<button type="button" class="btn btn-sm btn-ghost" data-action="edit-log" data-id="${l.id}" aria-label="Edit log: ${esc(title)}">Edit</button>` : ''}
       </div>
       ${logLines(l).map(([label, text]) => `<p>${label ? `<strong>${esc(label)}:</strong> ` : ''}${hl(text, ts)}</p>`).join('')}
       ${l.pendingAction ? `<p class="pending"><strong>Pending:</strong> ${hl(l.pendingAction, ts)}</p>` : ''}
@@ -500,6 +573,7 @@ function viewOverview() {
   <div class="overview-layout">
     <div class="overview-head">
     ${cloudBanner()}
+    ${fuStatus === 'error' ? followupBanner() : ''}
     <div class="page-head">
       <div>
         <h1>${greet}</h1>
@@ -743,6 +817,7 @@ function viewFollowups() {
     </tr>`).join('');
 
   return `
+    ${followupBanner()}
     <div class="page-head">
       <div><h1>Follow-ups &amp; tasks</h1><p class="muted">Owners, due dates, priorities and statuses. Overdue items are flagged.</p></div>
       <div class="actions"><button type="button" class="btn btn-primary" data-action="new-fu">+ Follow-up</button></div>
@@ -1074,6 +1149,7 @@ $('#log-back').addEventListener('click', () => {
 
 /* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }. */
 function openLogDialog(log, preset = {}) {
+  if (log && !canEditLog(log)) return toast('Only the person who wrote this log can edit it.', 'error');
   logForm.reset();
   clearInvalid(logForm);
   $('#log-dynamic').innerHTML = ''; // drop the previous log's fields so they aren't saved into the draft
@@ -1142,15 +1218,12 @@ logForm.addEventListener('submit', async (e) => {
 
   let fuProblem = '';
   if (makeFu) {
-    const r = commit((s) => {
-      s.followups.push({
-        id: uid(), title: rec.pendingAction, unit: rec.unit,
-        category: OPTIONS.categories.includes(rec.category) ? rec.category : 'General',
-        owner: v.fuOwner, assignee: '', dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority,
-        status: 'Open', nextAction: '', resolution: '', createdAt: now, updatedAt: now,
-      });
-    });
-    if (!r.ok) fuProblem = r.error;
+    const fu = await db(() => sb.from('followups').insert(fuToRow({
+      title: rec.pendingAction, unit: rec.unit,
+      category: OPTIONS.categories.includes(rec.category) ? rec.category : 'General',
+      owner: v.fuOwner, dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority, status: 'Open',
+    })).select().single());
+    if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
   }
   render();
   logDialog.close();
@@ -1180,7 +1253,7 @@ function openFuDialog(fu, overrides = {}) {
   clearInvalid(fuForm);
   const editing = !!fu;
   $('#fu-dialog-title').textContent = editing ? 'Edit follow-up' : 'New follow-up';
-  $('[data-action="delete"]', fuForm).hidden = !editing;
+  $('[data-action="delete"]', fuForm).hidden = !editing || !canDeleteFollowup(fu);
   setFormValues(fuForm, {
     ...(fu || { id: '', title: '', unit: '', category: 'General', owner: ui.team || 'Concierge', assignee: '', dueDate: dayOffset(1), priority: 'Medium', status: 'Open', nextAction: '', resolution: '' }),
     ...overrides,
@@ -1189,7 +1262,7 @@ function openFuDialog(fu, overrides = {}) {
   (overrides.status === 'Done' ? fuForm.elements.resolution : fuForm.elements.title).focus();
 }
 
-fuForm.addEventListener('submit', (e) => {
+fuForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   clearInvalid(fuForm);
   if (!requireFields(fuForm, ['title', 'dueDate'])) return;
@@ -1200,29 +1273,33 @@ fuForm.addEventListener('submit', (e) => {
     showFormError(fuForm, 'Record a resolution before marking this follow-up Done.');
     return;
   }
-  const now = new Date().toISOString();
   const rec = {
     title: v.title.trim(), unit: v.unit.trim(), category: v.category, owner: v.owner, assignee: v.assignee.trim(),
-    dueDate: v.dueDate, priority: v.priority, status: v.status, nextAction: v.nextAction.trim(), resolution: v.resolution.trim(), updatedAt: now,
+    dueDate: v.dueDate, priority: v.priority, status: v.status, nextAction: v.nextAction.trim(), resolution: v.resolution.trim(),
   };
-  const result = commit((s) => {
-    if (v.id) {
-      const i = s.followups.findIndex((f) => f.id === v.id);
-      if (i >= 0) s.followups[i] = { ...s.followups[i], ...rec };
-    } else {
-      s.followups.push({ id: uid(), createdAt: now, ...rec });
-    }
-  });
-  if (!result.ok) return showFormError(fuForm, `${result.error} Your entry has been kept — try saving again.`);
+  const btn = $('button[type="submit"]', fuForm);
+  setBusy(btn, true, 'Saving…');
+  const res = await db(() => (v.id
+    ? sb.from('followups').update({ ...fuToRow(rec), updated_at: new Date().toISOString() }).eq('id', v.id).select().single()
+    : sb.from('followups').insert(fuToRow(rec)).select().single()));
+  setBusy(btn, false);
+  if (!res.ok) return showFormError(fuForm, `${res.error} Your entry has been kept — try saving again.`);
+  const saved = fuFromRow(res.data);
+  const i = state.followups.findIndex((f) => f.id === saved.id);
+  if (i >= 0) state.followups[i] = saved; else state.followups.push(saved);
+  render();
   fuDialog.close();
   toast(v.id ? (rec.status === 'Done' ? 'Follow-up marked done.' : 'Follow-up updated.') : 'Follow-up saved.');
 });
 
 $('[data-action="delete"]', fuForm).addEventListener('click', async () => {
   const id = fuForm.elements.id.value;
-  if (!(await confirmDialog('Delete this follow-up? This cannot be undone.', 'Delete'))) return;
-  const r = commit((s) => { s.followups = s.followups.filter((f) => f.id !== id); });
-  if (!r.ok) return showFormError(fuForm, r.error);
+  if (!(await confirmDialog('Delete this follow-up for everyone? This cannot be undone.', 'Delete'))) return;
+  const res = await db(() => sb.from('followups').delete().eq('id', id).select());
+  if (res.ok && !res.data.length) res.ok = false, res.error = dbErrorMessage({ code: 'PGRST116' });
+  if (!res.ok) return showFormError(fuForm, res.error);
+  state.followups = state.followups.filter((f) => f.id !== id);
+  render();
   fuDialog.close();
   toast('Follow-up deleted.');
 });
@@ -1515,11 +1592,9 @@ $('#note-copy').addEventListener('click', async () => {
 const dataDialog = $('#data-dialog');
 
 function openDataDialog() {
-  let bytes = 0;
-  try { bytes = (localStorage.getItem(STORAGE_KEY) || '').length; } catch (_) { /* ignore */ }
   $('#data-stats').textContent =
-    `Shared database: ${state.logs.length} shift logs · ${state.notices.length} notices · ${state.resources.length} resources. ` +
-    `This browser: ${state.followups.length} follow-ups · ~${Math.ceil(bytes / 1024)} KB used.`;
+    `Shared database: ${state.logs.length} shift logs · ${state.followups.length} follow-ups · ` +
+    `${state.notices.length} notices · ${state.resources.length} resources.`;
   showFormError(dataDialog, '');
   dataDialog.showModal();
 }
@@ -1527,7 +1602,8 @@ function openDataDialog() {
 $('#data-btn').addEventListener('click', openDataDialog);
 
 $('#export-btn').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const { logs, followups, notices, resources } = state;
+  const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), logs, followups, notices, resources }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `concierge-dashboard-backup-${today()}.json`;
@@ -1536,52 +1612,6 @@ $('#export-btn').addEventListener('click', () => {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast('Backup exported.');
-});
-
-$('#import-file').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  e.target.value = '';
-  if (!file) return;
-  let data;
-  try {
-    data = JSON.parse(await file.text());
-    if (!data || !Array.isArray(data.followups)) throw new Error('shape');
-  } catch (_) {
-    return showFormError(dataDialog, 'That file is not a Concierge Dashboard backup.');
-  }
-  const imported = normalize(data);
-  if (!(await confirmDialog(`Replace this browser's follow-ups with the backup (${imported.followups.length} follow-ups)? Shared shift logs, notices and resources are not changed.`, 'Replace'))) return;
-  const r = commit((s) => { s.followups = imported.followups; });
-  if (!r.ok) return showFormError(dataDialog, r.error);
-  dataDialog.close();
-  toast('Backup imported.');
-});
-
-$('#seed-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog("Replace this browser's follow-ups with the fictional sample data? Shared shift logs, notices and resources are not changed.", 'Reset'))) return;
-  const sample = sampleData();
-  const r = commit((s) => { s.followups = sample.followups; });
-  if (!r.ok) return showFormError(dataDialog, r.error);
-  dataDialog.close();
-  toast('Sample data loaded.');
-});
-
-$('#perf-btn').addEventListener('click', () => {
-  const extra = bulkTestFollowups(500);
-  const t0 = performance.now();
-  const r = commit((s) => { s.followups.push(...extra); });
-  if (!r.ok) return showFormError(dataDialog, r.error);
-  const ms = performance.now() - t0;
-  dataDialog.close();
-  toast(`Added 500 test follow-ups. Saved and re-rendered in ${ms.toFixed(0)} ms.`);
-});
-
-$('#clear-btn').addEventListener('click', async () => {
-  if (!(await confirmDialog('Delete all follow-ups saved in this browser? Shared shift logs, notices and resources are not affected. Export a backup first if you need one.', 'Delete'))) return;
-  const r = commit((s) => { s.followups = []; });
-  if (!r.ok) return showFormError(dataDialog, r.error);
-  dataDialog.close();
-  toast('Follow-ups deleted from this browser.');
 });
 
 /* ----- Login (Supabase Auth) ----- */
@@ -1618,9 +1648,11 @@ function onSignedIn(session) {
   if (loginDialog.open) loginDialog.close();
   $('#account-email').textContent = session.user.email || '';
   $('#signout-btn').hidden = false;
+  currentUser = { id: session.user.id, email: session.user.email || '' };
   loadOccupants();
   loadCloud();
   loadResources();
+  loadFollowups();
 }
 
 /* Fills the "Unit or name" suggestions from the occupant_report table.
@@ -1748,6 +1780,15 @@ main.addEventListener('click', (e) => {
     }
     case 'retry-cloud': return loadCloud();
     case 'retry-res': return loadResources();
+    case 'retry-fu': return loadFollowups();
+    case 'upload-legacy-fu': return uploadLegacyFollowups(el);
+    case 'discard-legacy-fu':
+      confirmDialog(`Discard the ${state.legacyFollowups.length} follow-ups saved only in this browser? The shared list is not affected.`, 'Discard').then((yes) => {
+        if (!yes) return;
+        const r = commit((st) => { st.legacyFollowups = []; });
+        toast(r.ok ? 'Browser-only follow-ups discarded.' : r.error, r.ok ? 'ok' : 'error');
+      });
+      return;
     case 'upload-legacy-res': return uploadLegacyResources(el);
     case 'discard-legacy-res':
       confirmDialog(`Discard the ${state.legacyResources.length} resources saved only in this browser? The shared list is not affected.`, 'Discard').then((yes) => {
@@ -1774,16 +1815,16 @@ main.addEventListener('change', (e) => {
       el.value = f.status;
       return openFuDialog(f, { status: 'Done' });
     }
-    const r = commit((s) => {
-      const x = s.followups.find((y) => y.id === f.id);
-      x.status = el.value;
-      x.updatedAt = new Date().toISOString();
-    });
-    if (!r.ok) { el.value = f.status; toast(r.error, 'error'); }
-    else {
-      toast(`Status changed to ${el.value}.`);
+    const status = el.value;
+    el.disabled = true;
+    db(() => sb.from('followups').update({ status, updated_at: new Date().toISOString() }).eq('id', f.id).select().single()).then((res) => {
+      el.disabled = false;
+      if (!res.ok) { el.value = f.status; return toast(res.error, 'error'); }
+      Object.assign(f, fuFromRow(res.data));
+      render();
+      toast(`Status changed to ${status}.`);
       main.querySelector(`#st-${f.id}`)?.focus();
-    }
+    });
   }
 });
 
@@ -1863,6 +1904,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && cloudStatus === 'ready' && Date.now() - lastCloudLoad > 60000) {
     loadCloud({ quiet: true });
     loadResources({ quiet: true });
+    loadFollowups({ quiet: true });
   }
 });
 

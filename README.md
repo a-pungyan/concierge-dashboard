@@ -14,19 +14,19 @@ Open `index.html` in a browser. It needs no build step and no server, and it has
 - **Resources:** links to work systems, SharePoint trackers, SOPs, guides and contacts, with tips and tags. Pin a resource to show it on the Overview.
 - **Search and filters:** global search covers everything. Each tab also has its own filters (unit or keyword, date range, category, owner, status, priority).
 - **Generate shift note:** builds a handover note from the shift's logs and open follow-ups, grouped by team, ready to copy into an email or Teams. This is the main lever for the PRD's 30% shift note time goal.
-- **Data:** export or import a JSON backup of this browser's follow-ups, reset them to sample data, or add 500 test follow-ups to check performance.
+- **Data:** see what's stored and export a JSON backup of the shared data.
 
 Keyboard shortcuts: `/` search · `L` new shift log · `F` new follow-up · `N` shift note · `Esc` close or clear.
 
 ## Storage and security notes
 
-- Shift logs and notices are saved in Supabase (`shift_logs` and `notices` tables), shared by everyone who signs in. Resident suggestions come from the `occupant_report` table.
-- Resources are saved in Supabase (`resources` table). Everyone who signs in can read them; only users listed in `app_admins` can add, edit or delete them. Pins are personal and saved in each browser.
-- Follow-ups are still saved in this browser's `localStorage`.
-- Sign-in uses Supabase Auth. Every table needs Row Level Security policies for the `authenticated` role.
-- Saves are atomic. If a save fails, an error appears and whatever was entered stays in the form so you can retry.
-- All sample data is fictional. Replace the placeholder resource links with real ones from the Resources tab. Linked systems still use their own logins.
-- The code contains no passwords or API secrets.
+- Shift logs, follow-ups, notices and resources are saved in Supabase and shared by everyone who signs in. Resident suggestions come from the `occupant_report` table.
+- Each shift log records its author. Only the author (or an admin in `app_admins`) can edit or delete it.
+- Anyone signed in can add and update follow-ups. Only the creator (or an admin) can delete one.
+- Only admins can add, edit or delete resources. Pins are personal and saved in each browser.
+- Sign-in uses Supabase Auth. Every table has Row Level Security policies, so these rules are enforced by the database, not just the page.
+- If a save fails, an error appears and whatever was entered stays in the form so you can retry.
+- The code contains no passwords or secret keys (the Supabase anon key is designed to be public).
 
 ## Files
 
