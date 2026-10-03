@@ -1434,8 +1434,13 @@ function buildShiftNote(date, shift) {
         ...pending(l),
       ]))),
     category('Event(s):', entries(ops, 'event').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
-    ...entries(ops, 'general_operations').map((l) => bullet([run(l.actionTaken)], pending(l))),
   ]);
+  // General operations updates follow after a blank line, so they don't read as part of Event(s).
+  const general = entries(ops, 'general_operations').map((l) => bullet([run(l.actionTaken)], pending(l)));
+  if (general.length) {
+    blank();
+    list(general);
+  }
 
   heading('Resident Experience (Completed and Upcoming 120 Days of Resident Touchpoints)');
   const experience = entries('resident_experience').map((l) => {
