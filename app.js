@@ -552,7 +552,8 @@ function viewOverview() {
   const weekOut = dayOffset(7);
   const upcoming = active.filter((f) => f.dueDate > t && f.dueDate <= weekOut && f.priority !== 'High').sort(byDue);
   const todaysLogs = state.logs.filter((l) => l.date === t);
-  const recent = [...state.logs].sort(byLogRecent).slice(0, 6);
+  // Newest first. byLogRecent sorts by date then shift, so within today the latest shift comes first.
+  const todaysSorted = [...todaysLogs].sort(byLogRecent);
   const pinned = state.resources.filter(isPinned);
   const highCount = active.filter((f) => f.priority === 'High').length;
 
@@ -585,30 +586,28 @@ function viewOverview() {
         <button type="button" class="btn" data-action="shift-note">Generate shift note</button>
       </div>
     </div>
+    <div class="team-filter" role="group" aria-label="Show actionable items for">
+      <span class="muted">Actionable items for:</span>
+      <div class="segmented">${teamButtons}</div>
+    </div>
     </div>
 
     ${quickAccessHtml()}
 
     <div class="overview-main">
-    <div class="team-filter" role="group" aria-label="Show actionable items for">
-      <span class="muted">Actionable items for:</span>
-      <div class="segmented">${teamButtons}</div>
-    </div>
-
     <div class="stats">
+      <a class="stat" href="#logs"><span class="stat-value">${todaysLogs.length}</span><span class="stat-label">Logs today</span></a>
       ${stat('Open follow-ups', active.length, { status: 'active', owner: team })}
       ${stat('Overdue', overdue.length, { status: 'overdue', owner: team }, overdue.length ? 'tone-danger' : '')}
       ${stat('Due today', dueToday.length, { status: 'today', owner: team }, dueToday.length ? 'tone-warn' : '')}
       ${stat('High priority', highCount, { status: 'active', priority: 'High', owner: team })}
-      <a class="stat" href="#logs"><span class="stat-value">${todaysLogs.length}</span><span class="stat-label">Logs today</span></a>
     </div>
 
     <div class="overview-grid">
       <div class="col">
-        ${section('Overdue', overdue.length, list(overdue, 'Nothing overdue. 🎉'))}
-        ${section('Due today', dueToday.length, list(dueToday, 'Nothing due today.'))}
-        ${section('High priority', high.length, list(high, 'No other high-priority items.'))}
-        ${section('Coming up this week', upcoming.length, list(upcoming, 'Nothing else scheduled in the next 7 days.'))}
+        ${section("Today's shift activity", todaysSorted.length,
+          todaysSorted.length ? `<div class="logs compact">${todaysSorted.map((l) => logItem(l)).join('')}</div>` : emptyState('No shift logs yet today.'),
+          '<a href="#logs" class="small-link">View all</a>')}
       </div>
       <div class="col">
         ${section('Important notices', state.notices.length, `
@@ -620,9 +619,10 @@ function viewOverview() {
             <input id="notice-input" name="text" placeholder="Add a notice for the team…" autocomplete="off">
             <button type="submit" class="btn btn-sm">Add</button>
           </form>`)}
-        ${section('Recent shift activity', state.logs.length,
-          recent.length ? `<div class="logs compact">${recent.map((l) => logItem(l)).join('')}</div>` : emptyState('No shift logs yet.'),
-          '<a href="#logs" class="small-link">View all</a>')}
+        ${section('Overdue', overdue.length, list(overdue, 'Nothing overdue. 🎉'))}
+        ${section('Due today', dueToday.length, list(dueToday, 'Nothing due today.'))}
+        ${section('High priority', high.length, list(high, 'No other high-priority items.'))}
+        ${section('Coming up this week', upcoming.length, list(upcoming, 'Nothing else scheduled in the next 7 days.'))}
         ${section('Quick links', pinned.length,
           pinned.length ? `<ul class="quick-links">${pinned.map(resourceLink).join('')}</ul>` : emptyState('Pin resources on the Resources tab to show them here.'),
           '<a href="#resources" class="small-link">All resources</a>')}

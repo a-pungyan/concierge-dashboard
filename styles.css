@@ -1,9 +1,9 @@
 /* ---------- Tokens ---------- */
 :root {
-  --bg: #f6f5f1;
+  --bg: #F3F3F3;
   --surface: #ffffff;
-  --surface-2: #f1efe9;
-  --border: #e2dfd6;
+  --surface-2: #EBEBEB;
+  --border: #DEDEDE;
   --text: #1f2328;
   --muted: #61646b;
   --accent: #1f5f5b;
