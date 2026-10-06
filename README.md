@@ -28,6 +28,23 @@ Keyboard shortcuts: `/` search · `L` new shift log · `F` new follow-up · `N` 
 - If a save fails, an error appears and whatever was entered stays in the form so you can retry.
 - The code contains no passwords or secret keys (the Supabase anon key is designed to be public).
 
+## Updating residents from Yardi
+
+Export two Occupant Reports from Yardi as Excel and save them in the project folder, replacing last time's files:
+
+- `residents.xlsx`: current residents
+- `future.xlsx`: future residents (moving in, or moved in but still "Future" in Yardi)
+
+Then run this from the project folder:
+
+```
+python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt   # first time only
+.venv/bin/python tools/import_residents.py            # preview, changes nothing
+.venv/bin/python tools/import_residents.py --apply    # replace occupant_report
+```
+
+The script cleans both exports (header rows, unit spacing, units only shown on a household's first line, duplicate lines and totals), combines them and replaces the `occupant_report` table with the result. Only unit, name and relationship are imported. It needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`. It runs on your computer only, because the service_role key must never be in the website.
+
 ## Files
 
 - `index.html` contains the page shell and dialogs.
