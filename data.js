@@ -13,7 +13,7 @@ const OPTIONS = {
   priorities: ['High', 'Medium', 'Low'],
   statuses: ['Open', 'In progress', 'Waiting', 'Done'],
   resourceGroups: ['Work systems', 'SharePoint trackers', 'SOPs', 'Guides & tips', 'Contacts'],
-  shifts: ['Morning', 'Afternoon', 'Overnight'],
+  shifts: ['Morning', 'Afternoon'],
 };
 
 /* Overview quick-access sidebar. Leave url empty to use the Resource with the same name

@@ -345,11 +345,10 @@ function dueLabel(f) {
   return `Overdue by ${-n} day${n === -1 ? '' : 's'}`;
 }
 
+/* Morning is 7am–3pm and Afternoon 3pm–11pm. There is no overnight shift, so anything
+   before 3pm (including early arrivals) counts as Morning and later as Afternoon. */
 function currentShift() {
-  const h = new Date().getHours();
-  if (h >= 6 && h < 14) return 'Morning';
-  if (h >= 14 && h < 22) return 'Afternoon';
-  return 'Overnight';
+  return new Date().getHours() < 15 ? 'Morning' : 'Afternoon';
 }
 
 const byDue = (a, b) =>
@@ -363,7 +362,7 @@ function sortFollowups(list) {
   });
 }
 
-const SHIFT_RANK = { Overnight: 0, Morning: 1, Afternoon: 2 };
+const SHIFT_RANK = { Morning: 1, Afternoon: 2 };
 const byLogRecent = (a, b) =>
   b.date.localeCompare(a.date) || (SHIFT_RANK[b.shift] ?? 0) - (SHIFT_RANK[a.shift] ?? 0) || (b.createdAt || '').localeCompare(a.createdAt || '');
 
