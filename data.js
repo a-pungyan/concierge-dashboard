@@ -64,7 +64,8 @@ const SUGGESTIONS = {
    Every log belongs to one section of the shift note (section) and one subtype.
    Each subtype has its own form. Field names map to shift_logs columns:
    unit, category, description, actionTaken, pendingAction, guestSuite, checkIn;
-   touchpoint, gift and giftStatus are stored in the "details" column. */
+   touchpoint, gift, giftStatus and checkOut are stored in the "details" column.
+   { row: [...] } shows its fields side by side. */
 
 const F = {
   resident: (label = 'Unit / Resident') => ({ name: 'unit', label, required: true, list: 'occupant-list', placeholder: 'Type a unit or resident name' }),
@@ -93,7 +94,10 @@ const SECTIONS = [
       { id: 'guest_suite', title: 'Guest Suite', fields: [
         F.resident('Booked by'),
         { name: 'guestSuite', label: 'Guest suite', required: true, placeholder: 'e.g. E511' },
-        { name: 'checkIn', label: 'Check-in date', type: 'date', required: true },
+        { row: [
+          { name: 'checkIn', label: 'Check-in date', type: 'date' },
+          { name: 'checkOut', label: 'Check-out date', type: 'date' },
+        ] },
         { name: 'actionTaken', label: 'Status / note', type: 'textarea', required: true, placeholder: 'e.g. Previous guest has checked out, kindly ask WR to clean in the morning.' },
         F.pending,
       ] },

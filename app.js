@@ -497,8 +497,9 @@ function fuListItem(f, ts) {
 function logLines(l) {
   const d = l.details || {};
   const lines = [];
-  if (l.guestSuite || l.checkIn) {
-    lines.push(['Guest suite', [l.guestSuite, l.checkIn && `check-in ${fmtDate(l.checkIn)}`].filter(Boolean).join(', ')]);
+  if (l.guestSuite || l.checkIn || d.checkOut) {
+    lines.push(['Guest suite', [l.guestSuite, l.checkIn && `check-in ${fmtDate(l.checkIn)}`,
+      d.checkOut && `check-out ${fmtDate(d.checkOut)}`].filter(Boolean).join(', ')]);
   }
   if (d.touchpoint) lines.push(['Touchpoint', d.touchpoint]);
   if (d.gift) lines.push(['Gift', d.giftStatus ? `${d.gift} – ${d.giftStatus}` : d.gift]);
@@ -1058,7 +1059,10 @@ function currentSubtypeDef() {
   return sec.subtypes.find((st) => st.id === id) || null;
 }
 
+const fieldsOf = (def) => def.fields.flatMap((f) => f.row || [f]);
+
 function fieldHtml(f) {
+  if (f.row) return `<div class="grid-2">${f.row.map(fieldHtml).join('')}</div>`;
   const req = f.required ? ' required' : '';
   const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
   let control;
@@ -1079,7 +1083,7 @@ function renderLogFields() {
   $('#log-fields').hidden = !def;
   $('#log-dynamic').innerHTML = def ? def.fields.map(fieldHtml).join('') : '';
   if (!def) return;
-  def.fields.forEach((f) => {
+  fieldsOf(def).forEach((f) => {
     const el = logForm.elements[f.name];
     if (el && logDraft[f.name] != null) el.value = logDraft[f.name];
   });
@@ -1181,9 +1185,15 @@ logForm.addEventListener('submit', async (e) => {
     $('input[name="subtype"]', logForm)?.focus();
     return;
   }
-  if (!requireFields(logForm, ['date', ...def.fields.filter((f) => f.required).map((f) => f.name)])) return;
+  if (!requireFields(logForm, ['date', ...fieldsOf(def).filter((f) => f.required).map((f) => f.name)])) return;
   const v = Object.fromEntries(new FormData(logForm));
   const val = (n) => String(v[n] ?? '').trim();
+  if (val('checkIn') && val('checkOut') && val('checkOut') < val('checkIn')) {
+    logForm.elements.checkOut.setAttribute('aria-invalid', 'true');
+    logForm.elements.checkOut.focus();
+    showFormError(logForm, 'The check-out date is before the check-in date.');
+    return;
+  }
   const makeFu = !v.id && logForm.elements.makeFollowup.checked;
   if (makeFu && !val('pendingAction')) {
     logForm.elements.pendingAction.setAttribute('aria-invalid', 'true');
@@ -1193,7 +1203,7 @@ logForm.addEventListener('submit', async (e) => {
   }
   const now = new Date().toISOString();
   const details = {};
-  ['touchpoint', 'gift', 'giftStatus'].forEach((k) => { if (val(k)) details[k] = val(k); });
+  ['touchpoint', 'gift', 'giftStatus', 'checkOut'].forEach((k) => { if (val(k)) details[k] = val(k); });
   const rec = {
     date: v.date, shift: v.shift, section: sec.id,
     // Amenities are sub-typed by area (e.g. "curb_appeal"); other sections by the chosen subtype.
@@ -1388,6 +1398,17 @@ const bullet = (runs, children = []) => ({ runs, children });
 // Resident suggestions used to be "E02 — Dana Fox"; the note uses "E02 Dana Fox".
 const who = (unit) => String(unit || '').replace(/\s+—\s+/, ' ').trim();
 
+/* e.g. "Upcoming Check-in – October 5", "Check-in – October 5, Check-out – October 8",
+   or "Guest Suite Update" when no dates are given. */
+function guestSuiteHeading(l) {
+  const day = (iso) => fmtDate(iso, { month: 'long', day: 'numeric' });
+  const out = l.details?.checkOut;
+  if (l.checkIn && out) return `Check-in – ${day(l.checkIn)}, Check-out – ${day(out)}`;
+  if (l.checkIn) return `Upcoming Check-in – ${day(l.checkIn)}`;
+  if (out) return `Upcoming Check-out – ${day(out)}`;
+  return 'Guest Suite Update';
+}
+
 function buildShiftNote(date, shift) {
   const logs = state.logs
     .filter((l) => l.date === date && (!shift || l.shift === shift))
@@ -1426,7 +1447,7 @@ function buildShiftNote(date, shift) {
     category('Vendors/Contractors:', entries(ops, 'vendor_contractor').map((l) =>
       bullet([run(vendorLine(l))], [...(l.description ? [bullet([run(l.description)])] : []), ...pending(l)]))),
     category('Guest Suite(s):', entries(ops, 'guest_suite').map((l) =>
-      bullet([run(`Upcoming Check-in${l.checkIn ? ` – ${fmtDate(l.checkIn, { month: 'long', day: 'numeric' })}` : ''}:`)], [
+      bullet([run(`${guestSuiteHeading(l)}:`)], [
         bullet([run(`Booked by: ${who(l.unit)}`)]),
         ...(l.guestSuite ? [bullet([run(`Guest Suite: ${l.guestSuite}`)])] : []),
         bullet([run(l.actionTaken)]),
