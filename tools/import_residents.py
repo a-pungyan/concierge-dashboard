@@ -1,8 +1,9 @@
 """Import the Yardi occupant exports into the Supabase occupant_report table.
 
-Save the two Yardi Occupant Report exports in the project folder as:
+Save the Yardi Occupant Report exports in the project folder as:
     residents.xlsx   current residents
     future.xlsx      future residents (moving in, or moved in but still "Future" in Yardi)
+    notice.xlsx      residents on notice (still living here, but moving out)
 
 Together they are treated as the full list of residents: after a successful
 import the table holds exactly the people in those files. Only unit, name and
@@ -30,7 +31,7 @@ from supabase import create_client
 TABLE = 'occupant_report'
 ROOT = Path(__file__).resolve().parent.parent
 CURRENT_FILE = 'residents'
-FUTURE_FILE = 'future'
+OPTIONAL_FILES = ['future', 'notice']
 
 # Yardi column headings (lowercased, punctuation stripped) -> occupant_report column.
 COLUMN_ALIASES = {
@@ -156,12 +157,12 @@ def main():
     current_path = find_export(CURRENT_FILE)
     if not current_path:
         sys.exit(f'Save the current Occupant Report as {CURRENT_FILE}.xlsx in {ROOT}')
-    future_path = find_export(FUTURE_FILE)
+    paths = [current_path] + [find_export(name) for name in OPTIONAL_FILES]
 
     # One row per person per unit. Yardi repeats a person for each extra vehicle or pet,
-    # and someone can be in both reports; the current report wins.
+    # and someone can be in more than one report.
     rows, seen = [], set()
-    for path in filter(None, [current_path, future_path]):
+    for path in filter(None, paths):
         print(f'\n{path.name}')
         added = 0
         for row in load_rows(path):
@@ -170,8 +171,9 @@ def main():
                 rows.append(row)
                 added += 1
         print(f'{added} residents added from {path.name}.')
-    if not future_path:
-        print(f'\nNote: no {FUTURE_FILE}.xlsx found, so future residents are not included.')
+    for name, path in zip(OPTIONAL_FILES, paths[1:]):
+        if not path:
+            print(f'\nNote: no {name}.xlsx found, so {name} residents are not included.')
     if not rows:
         sys.exit('No resident rows found.')
 
