@@ -1090,6 +1090,15 @@ function renderLogFields() {
   if (logForm.elements.category && !logForm.elements.category.value) logForm.elements.category.value = 'General';
 }
 
+/* Picking a known vendor fills in its usual update, unless the update was typed by hand. */
+$('#log-dynamic').addEventListener('input', (e) => {
+  if (e.target.name !== 'unit' || currentSubtypeDef()?.id !== 'vendor_contractor') return;
+  const update = logForm.elements.actionTaken;
+  const known = Object.entries(VENDOR_UPDATES).find(([v]) => v.toLowerCase() === e.target.value.trim().toLowerCase());
+  const isDefault = !update.value || Object.values(VENDOR_UPDATES).includes(update.value);
+  if (known?.[1] && isDefault) update.value = known[1];
+});
+
 function showLogStep(step) {
   logStep = step;
   $('#log-step1').hidden = step !== 1;

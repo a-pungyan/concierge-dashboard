@@ -52,12 +52,23 @@ const WEATHER = {
   unit: 'celsius', // or 'fahrenheit'
 };
 
+/* Common vendors and the "Update" text filled in when one is picked ('' = no default). */
+const VENDOR_UPDATES = {
+  'White Rose': 'On site for cleaning.',
+  SPA: '',
+};
+
 /* Suggestions for free-text fields (people can still type their own value). */
 const SUGGESTIONS = {
   // Same list as the "Trackers" card in the Overview sidebar (QUICK_ACCESS above).
   trackers: QUICK_ACCESS.find((g) => g.title === 'Trackers').links.map((l) => l.name),
-  vendors: ['White Rose', 'SPA'],
-  areas: ['Curb Appeal', 'Ledbury Chutes', 'LIDO', 'Sky Lounge', 'STOA', 'Dining / Boardroom', 'Yoga Room', 'The Temple', 'North Court', 'Sports Lounge', 'Ski Simulator', 'F1 Simulator', 'Lobby', 'Elevators', 'Other Common Area'],
+  vendors: Object.keys(VENDOR_UPDATES),
+  areas: ['Curb Appeal', 'Ledbury Chutes', 'Sky Lounge', 'Dining / Boardroom', 'Yoga Room', 'The Temple', 'North Court', 'Sports Lounge', 'Ski Simulator', 'F1 Simulator', 'Lobby', 'Elevators',
+    'Workout Accessories', 'STOA (Elm) - Fireplace', 'STOA (Ledbury) - Fireplace', 'Ledbury LIDO',
+    'STOA (Ledbury) - Pizza Oven Tools Reservation 1', 'Elm BBQ Tool Set 1', 'Elm BBQ Tool Set 2',
+    'Classic Clue Board Game', 'Monopoly Board Game', 'UNO Card Game', 'Taboo Game', 'Classic Scrabble Board Game',
+    'Chess & Checkers Set', 'Travel Inspira Luggage Scale', 'SALAV X3A Commercial Garment Steamer', 'Adidas Tango Soccer Ball',
+    'Other Common Area'],
 };
 
 /* ---------- Shift log types ----------
