@@ -56,12 +56,14 @@ const WEATHER = {
 const VENDOR_UPDATES = {
   'White Rose': 'On site for cleaning.',
   'SPA': 'On site for pool maintenance.',
-  'Sky Contractors': 'On site for work in:',
+  'SKY': 'On site for work in:',
   'Orkin': 'On site for pest control in:',
   'BOND': 'On site for:',
   'Delta': 'On site for elevator:',
   'Rogers': 'On site for:',
-  'RSF Guards/Security/Movers': 'On site for:'
+  'RSF Guards/Security/Movers': 'On site for:',
+  'Eddy Solutions': 'On site for',
+  'HP Renovations': 'On site for'
 };
 
 /* Sugge
