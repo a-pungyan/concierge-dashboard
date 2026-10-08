@@ -55,10 +55,17 @@ const WEATHER = {
 /* Common vendors and the "Update" text filled in when one is picked ('' = no default). */
 const VENDOR_UPDATES = {
   'White Rose': 'On site for cleaning.',
-  SPA: '',
+  'SPA': 'On site for pool maintenance.',
+  'Sky Contractors': 'On site for work in:',
+  'Orkin': 'On site for pest control in:',
+  'BOND': 'On site for:',
+  'Delta': 'On site for elevator:',
+  'Rogers': 'On site for:',
+  'RSF Guards/Security/Movers': 'On site for:'
 };
 
-/* Suggestions for free-text fields (people can still type their own value). */
+/* Sugge
+stions for free-text fields (people can still type their own value). */
 const SUGGESTIONS = {
   // Same list as the "Trackers" card in the Overview sidebar (QUICK_ACCESS above).
   trackers: QUICK_ACCESS.find((g) => g.title === 'Trackers').links.map((l) => l.name),
