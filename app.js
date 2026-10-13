@@ -1517,21 +1517,6 @@ function buildShiftNote(date, shift) {
   });
   list([...areas.values(), bullet([run('All other amenities in good condition.')])]);
 
-  // Open follow-ups, grouped by the team that owns them.
-  heading('Outstanding Follow-ups');
-  const open = sortFollowups(state.followups.filter((f) => f.status !== 'Done'));
-  const teams = OPTIONS.teams
-    .map((team) => [team, open.filter((f) => f.owner === team)])
-    .filter(([, items]) => items.length)
-    .map(([team, items]) => bullet([run(`${team}:`, 'b')], items.map((f) => {
-      const when = isOverdue(f) ? `Overdue – was due ${fmtDate(f.dueDate, { month: 'long', day: 'numeric' })}`
-        : f.dueDate === today() ? 'Due today'
-        : `Due ${fmtDate(f.dueDate, { month: 'long', day: 'numeric' })}`;
-      return bullet([run(`${f.unit ? `${who(f.unit)} – ` : ''}${f.title} (${when}${f.priority === 'High' ? ', high priority' : ''})`)],
-        f.nextAction ? [bullet([run('Next:', 'b'), run(` ${f.nextAction}`)])] : []);
-    })));
-  list(teams.length ? teams : [bullet([run('NA', 'b')])]);
-
   blank();
   para(run('Kind Regards,'));
   return blocks;
