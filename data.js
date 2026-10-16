@@ -4,6 +4,7 @@
 /* Shift note template settings. */
 const SHIFT_NOTE = {
   property: 'Elm–Ledbury',
+  buildings: ['Elm', 'Ledbury'], // asked for when generating a note; used in the opening line
 };
 
 const OPTIONS = {

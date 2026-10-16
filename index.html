@@ -143,11 +143,24 @@
     </form>
   </dialog>
 
+  <!-- Building picker, shown before the shift note -->
+  <dialog id="building-dialog" aria-labelledby="building-dialog-title">
+    <div class="dialog-body">
+      <h2 id="building-dialog-title">Which building is this shift note for?</h2>
+      <div class="dialog-actions" id="building-choices"></div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-ghost" data-action="cancel">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Shift note dialog -->
   <dialog id="note-dialog" aria-labelledby="note-dialog-title" class="wide">
     <div class="dialog-body">
       <h2 id="note-dialog-title">Shift note</h2>
-      <div class="grid-2">
+      <div class="grid-3">
+        <label>Building<select id="note-building"></select></label>
         <label>Date<input type="date" id="note-date"></label>
         <label>Shift
           <select id="note-shift"><option value="">All shifts</option><option>Morning</option><option>Afternoon</option></select>

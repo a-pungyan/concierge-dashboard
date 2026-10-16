@@ -1418,7 +1418,7 @@ function guestSuiteHeading(l) {
   return 'Guest Suite Update';
 }
 
-function buildShiftNote(date, shift) {
+function buildShiftNote(date, shift, building) {
   const logs = state.logs
     .filter((l) => l.date === date && (!shift || l.shift === shift))
     .sort((a, b) => (SHIFT_RANK[a.shift] ?? 0) - (SHIFT_RANK[b.shift] ?? 0) || (a.createdAt || '').localeCompare(b.createdAt || ''));
@@ -1445,7 +1445,7 @@ function buildShiftNote(date, shift) {
 
   para(run('Hi Team,'));
   blank();
-  para(run(`Please see shift notes for ${SHIFT_NOTE.property}.`));
+  para(run(`Please see shift notes for ${building || SHIFT_NOTE.property}.`));
 
   /* Operations and Events: the four standard subsections, then any general operations updates. */
   heading('Operations and Events');
@@ -1501,21 +1501,28 @@ function buildShiftNote(date, shift) {
   });
 
   heading('Amenities, Common Areas and Curb Appeal');
-  const areas = new Map(); // entries for the same area share one bullet
-  entries('amenities_common_areas').forEach((l) => {
-    const name = who(l.unit);
-    const key = name.toLowerCase();
-    if (!areas.has(key)) areas.set(key, bullet([run(`${name}:`, 'b')]));
-    const children = areas.get(key).children;
-    if (l.description) {
-      children.push(labelled('Status:', l.description));
-      if (l.actionTaken) children.push(labelled('Action:', l.actionTaken));
-    } else if (l.actionTaken) {
-      children.push(labelled('Concern:', l.actionTaken)); // logs saved before the Status field existed
-    }
-    if (l.pendingAction) children.push(labelled('To-Do:', l.pendingAction));
-  });
-  list([...areas.values(), bullet([run('All other amenities in good condition.')])]);
+  const areaBullets = (logs) => {
+    const areas = new Map(); // entries for the same area share one bullet
+    logs.forEach((l) => {
+      const name = who(l.unit);
+      const key = name.toLowerCase();
+      if (!areas.has(key)) areas.set(key, bullet([run(`${name}:`, 'b')]));
+      const children = areas.get(key).children;
+      if (l.description) {
+        children.push(labelled('Status:', l.description));
+        if (l.actionTaken) children.push(labelled('Action:', l.actionTaken));
+      } else if (l.actionTaken) {
+        children.push(labelled('Concern:', l.actionTaken)); // logs saved before the Status field existed
+      }
+      if (l.pendingAction) children.push(labelled('To-Do:', l.pendingAction));
+    });
+    return [...areas.values()];
+  };
+  const amenities = entries('amenities_common_areas');
+  // A note for all shifts lists each shift's amenity updates under its own bullet.
+  const amenityItems = shift || !amenities.length ? areaBullets(amenities)
+    : OPTIONS.shifts.map((s) => category(`${s}:`, areaBullets(amenities.filter((l) => l.shift === s))));
+  list([...amenityItems, bullet([run('All other amenities in good condition.')])]);
 
   blank();
   para(run('Kind Regards,'));
@@ -1565,7 +1572,7 @@ function notePlain(blocks) {
 }
 
 function refreshNote() {
-  $('#note-preview').innerHTML = noteHtml(buildShiftNote($('#note-date').value || today(), $('#note-shift').value));
+  $('#note-preview').innerHTML = noteHtml(buildShiftNote($('#note-date').value || today(), $('#note-shift').value, $('#note-building').value));
 }
 
 /* True if this computer can draw Calibri in bold (bold text measures wider than regular). */
@@ -1578,7 +1585,26 @@ function calibriBoldAvailable() {
   return Math.abs(ctx.measureText(sample).width - regular) > 0.5;
 }
 
-function openNoteDialog() {
+/* Generating a note first asks which building it's for. The choice can still be
+   changed in the note dialog afterwards. */
+const buildingDialog = $('#building-dialog');
+$('#building-choices').innerHTML = SHIFT_NOTE.buildings
+  .map((b) => `<button type="button" class="btn btn-primary" data-building="${esc(b)}">${esc(b)}</button>`).join('');
+$('#note-building').innerHTML = SHIFT_NOTE.buildings.map((b) => `<option>${esc(b)}</option>`).join('');
+$('#building-choices').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-building]');
+  if (!btn) return;
+  buildingDialog.close();
+  openNoteDialog(btn.dataset.building);
+});
+
+function chooseBuilding() {
+  buildingDialog.showModal();
+  $('#building-choices button').focus();
+}
+
+function openNoteDialog(building) {
+  $('#note-building').value = building;
   $('#note-preview').classList.toggle('fake-bold', !calibriBoldAvailable());
   $('#note-date').value = today();
   $('#note-shift').value = currentShift();
@@ -1587,6 +1613,7 @@ function openNoteDialog() {
   $('#note-copy').focus();
 }
 
+$('#note-building').addEventListener('change', refreshNote);
 $('#note-date').addEventListener('change', refreshNote);
 $('#note-shift').addEventListener('change', refreshNote);
 
@@ -1775,7 +1802,7 @@ main.addEventListener('click', (e) => {
     case 'done-fu': return openFuDialog(state.followups.find((f) => f.id === id), { status: 'Done' });
     case 'new-res': return openResDialog();
     case 'edit-res': return openResDialog(state.resources.find((r) => r.id === id));
-    case 'shift-note': return openNoteDialog();
+    case 'shift-note': return chooseBuilding();
     case 'set-team': ui.team = el.dataset.team; return render();
     case 'goto-fu': {
       const f = JSON.parse(el.dataset.filter);
@@ -1919,7 +1946,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') { e.preventDefault(); searchInput.focus(); searchInput.select(); }
   else if (e.key === 'l' || e.key === 'L') { e.preventDefault(); openLogDialog(); }
   else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); openFuDialog(); }
-  else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openNoteDialog(); }
+  else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); chooseBuilding(); }
 });
 
 /* Pick up teammates' new logs and notices when coming back to the tab. */
