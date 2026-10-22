@@ -1431,7 +1431,11 @@ function buildShiftNote(date, shift, building) {
   const para = (...runs) => blocks.push({ type: 'p', runs });
   const blank = () => blocks.push({ type: 'blank' });
   const heading = (text) => { blank(); para(run(text, 'bu')); };
-  const list = (items) => blocks.push({ type: 'list', items });
+  // Each top-level bullet gets its own list with a blank line between, so entries are easy to scan.
+  const list = (items) => items.forEach((item, i) => {
+    if (i) blank();
+    blocks.push({ type: 'list', items: [item] });
+  });
 
   const labelled = (label, text) => bullet([run(label, 'b'), run(` ${text}`)]);
   const pending = (l, ifEmpty) => (l.pendingAction || ifEmpty ? [labelled('Pending:', l.pendingAction || ifEmpty)] : []);
@@ -1480,7 +1484,7 @@ function buildShiftNote(date, shift, building) {
     const t = l.details?.touchpoint;
     return bullet([run(`${who(l.unit)}:`, 'b'), run(` ${t && t !== 'Other' ? `${t} touchpoint – ` : ''}${l.actionTaken}`)], pending(l));
   });
-  list(experience.length ? experience : [bullet([run('No calls made tonight, will resume tomorrow.', 'b')])]);
+  list(experience.length ? experience : [bullet([run('NA', 'b')])]);
 
   heading('Fitz Gifts:');
   const gifts = entries('fitz_gifts').map((l) => {
@@ -1496,12 +1500,7 @@ function buildShiftNote(date, shift, building) {
       ...(l.description && l.actionTaken ? [labelled('Action:', l.actionTaken)] : []),
       ...pending(l, 'None.'),
     ]));
-  // Each resident gets its own list with a blank line between, so entries are easy to scan.
-  if (!residents.length) list([bullet([run('NA', 'b')])]);
-  residents.forEach((item, i) => {
-    if (i) blank();
-    list([item]);
-  });
+  list(residents.length ? residents : [bullet([run('NA', 'b')])]);
 
   heading('Amenities, Common Areas and Curb Appeal');
   const areaBullets = (logs) => {
