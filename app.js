@@ -1048,6 +1048,7 @@ $('#log-sections').innerHTML = SECTIONS.map((sec) => `
 });
 
 let logStep = 1;
+let logTodoId = '';         // to-do the open log was made from; checked off once saved
 let logDraft = {};          // field values kept while moving between steps and subtypes
 let logSubtypePreset = '';  // subtype to pre-select when editing
 
@@ -1163,7 +1164,8 @@ $('#log-back').addEventListener('click', () => {
 
 /* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }.
    duplicate copies an existing log into a new one, dated today for the current shift. */
-function openLogDialog(log, preset = {}, { duplicate = false } = {}) {
+function openLogDialog(log, preset = {}, { duplicate = false, todoId = '' } = {}) {
+  logTodoId = todoId;
   if (log && !canEditLog(log)) return toast('Only the person who wrote this log can edit it.', 'error');
   logForm.reset();
   clearInvalid(logForm);
@@ -1246,6 +1248,7 @@ logForm.addEventListener('submit', async (e) => {
     })).select().single());
     if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
   }
+  if (logTodoId && !v.id) saveTodos(loadTodos().map((t) => (t.id === logTodoId ? { ...t, done: true } : t)));
   render();
   logDialog.close();
   if (fuProblem) toast(`Shift log saved, but the follow-up could not be saved: ${fuProblem}`, 'error');
@@ -1826,6 +1829,10 @@ main.addEventListener('click', (e) => {
       else main.querySelector(`[data-action="pin-res"][data-id="${id}"]`)?.focus();
       return;
     }
+    case 'todo-to-log': {
+      const t = loadTodos().find((x) => x.id === id);
+      return t && openLogDialog(null, todoToLog(t.text), { todoId: t.id });
+    }
     case 'del-todo':
       saveTodos(loadTodos().filter((t) => t.id !== id));
       render();
@@ -1939,13 +1946,45 @@ function todoSection() {
     ${todos.length ? `<ul class="todos">${todos.map((t) => `
       <li class="${t.done ? 'done' : ''}">
         <label class="check"><input type="checkbox" data-action="toggle-todo" data-id="${t.id}"${t.done ? ' checked' : ''}> <span>${esc(t.text)}</span></label>
-        <button type="button" class="btn btn-sm btn-ghost" data-action="del-todo" data-id="${t.id}" aria-label="Remove to-do: ${esc(t.text)}">Remove</button></li>`).join('')}</ul>`
+        <span class="todo-actions">
+          <button type="button" class="btn btn-sm btn-ghost" data-action="todo-to-log" data-id="${t.id}" aria-label="Turn into shift log: ${esc(t.text)}">Log it</button>
+          <button type="button" class="btn btn-sm btn-ghost" data-action="del-todo" data-id="${t.id}" aria-label="Remove to-do: ${esc(t.text)}">Remove</button>
+        </span></li>`).join('')}</ul>`
       : emptyState('Nothing on your list. It clears each day.')}
     <form class="inline-form" data-form="todo">
       <label for="todo-input" class="sr-only">New to-do</label>
       <input id="todo-input" name="text" placeholder="Add a to-do…" autocomplete="off">
       <button type="submit" class="btn btn-sm">Add</button>
     </form>`);
+}
+
+/* Tidies a quick to-do like "e315 tristan needs to send proof" into a shift log draft:
+   the unit is matched to the resident list (E315 -> E0315 Tristan Lee) and the rest becomes
+   a sentence ("Tristan needs to send proof."). Without a unit, the type is chosen as usual. */
+function todoToLog(text) {
+  let rest = text.replace(/\s+/g, ' ').trim();
+  let unit = '';
+  let name = '';
+  const m = rest.match(/^([EW])\s?-?(\d{3,4})\b[\s:,–-]*/i);
+  if (m) {
+    unit = m[1].toUpperCase() + m[2].padStart(4, '0');
+    rest = rest.slice(m[0].length);
+    const inUnit = occupants.filter((o) => String(o.unit).toUpperCase() === unit);
+    const word = rest.split(/[\s,:]/)[0].toLowerCase();
+    const who = word && inUnit.find((o) => String(o.first_name || '').split(' ')[0].toLowerCase() === word);
+    if (who) {
+      name = occLabel(who);
+      rest = String(who.first_name).split(' ')[0] + rest.slice(word.length); // proper-case the name
+    }
+  }
+  const sentence = rest
+    .replace(/\bi\b/g, 'I')
+    .replace(/\s+([,.!?])/g, '$1')
+    .replace(/(^|[.!?]\s+)([a-z])/g, (_, p, c) => p + c.toUpperCase())
+    .replace(/([^.!?])$/, '$1.');
+  return unit
+    ? { section: 'residents_guests', unit: name || unit, description: sentence }
+    : { actionTaken: sentence };
 }
 
 function addTodo(form) {

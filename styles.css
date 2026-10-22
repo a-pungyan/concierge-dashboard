@@ -231,7 +231,8 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 .todos { list-style: none; margin: 0 0 10px; padding: 0; }
 .todos li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); }
 .todos li:first-child { border-top: 0; }
-.todos li.done span { text-decoration: line-through; color: var(--muted); }
+.todos li.done label span { text-decoration: line-through; color: var(--muted); }
+.todo-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .inline-form { display: flex; gap: 8px; }
 .inline-form .btn { min-height: 40px; }
 .quick-links { list-style: none; margin: 0; padding: 0; }
