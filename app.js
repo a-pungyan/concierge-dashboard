@@ -519,6 +519,7 @@ function logItem(l, ts) {
         <span class="badge cat">${hl(logTypeLabel(l), ts)}</span>
         <span class="muted">${esc(l.shift)} · ${esc(fmtDate(l.date))} · <span title="${esc(l.author)}">by ${esc(authorLabel(l.author, l.createdBy))}</span></span>
         <span class="spacer"></span>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="duplicate-log" data-id="${l.id}" aria-label="Duplicate log: ${esc(title)}">Duplicate</button>
         ${canEditLog(l) ? `<button type="button" class="btn btn-sm btn-ghost" data-action="edit-log" data-id="${l.id}" aria-label="Edit log: ${esc(title)}">Edit</button>` : ''}
       </div>
       ${logLines(l).map(([label, text]) => `<p>${label ? `<strong>${esc(label)}:</strong> ` : ''}${hl(text, ts)}</p>`).join('')}
@@ -610,6 +611,7 @@ function viewOverview() {
           '<a href="#logs" class="small-link">View all</a>')}
       </div>
       <div class="col">
+        ${todoSection()}
         ${section('Important notices', state.notices.length, `
           ${state.notices.length ? `<ul class="notices">${state.notices.map((n) => `
             <li><span>${esc(n.text)}</span>
@@ -1159,8 +1161,9 @@ $('#log-back').addEventListener('click', () => {
   ($('input[name="section"]:checked', logForm) || $('input[name="section"]', logForm)).focus();
 });
 
-/* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }. */
-function openLogDialog(log, preset = {}) {
+/* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }.
+   duplicate copies an existing log into a new one, dated today for the current shift. */
+function openLogDialog(log, preset = {}, { duplicate = false } = {}) {
   if (log && !canEditLog(log)) return toast('Only the person who wrote this log can edit it.', 'error');
   logForm.reset();
   clearInvalid(logForm);
@@ -1168,7 +1171,7 @@ function openLogDialog(log, preset = {}) {
   const editing = !!log;
   logDraft = editing ? { ...log, ...(log.details || {}) } : { ...preset };
   logSubtypePreset = (editing ? log.subtype : preset.subtype) || '';
-  $('#log-dialog-title').textContent = editing ? 'Edit shift log' : 'New shift log';
+  $('#log-dialog-title').textContent = editing ? 'Edit shift log' : duplicate ? 'Duplicate shift log' : 'New shift log';
   $('[data-action="delete"]', logForm).hidden = !editing;
   $('#log-followup-fields').hidden = editing;
   setFormValues(logForm, {
@@ -1797,6 +1800,10 @@ main.addEventListener('click', (e) => {
       fuForm.elements.unit.value = el.dataset.unit;
       return;
     case 'edit-log': return openLogDialog(state.logs.find((l) => l.id === id));
+    case 'duplicate-log': {
+      const l = state.logs.find((x) => x.id === id);
+      return l && openLogDialog(null, { ...l, ...(l.details || {}) }, { duplicate: true });
+    }
     case 'new-fu': return openFuDialog();
     case 'edit-fu': return openFuDialog(state.followups.find((f) => f.id === id));
     case 'done-fu': return openFuDialog(state.followups.find((f) => f.id === id), { status: 'Done' });
@@ -1816,6 +1823,11 @@ main.addEventListener('click', (e) => {
       else main.querySelector(`[data-action="pin-res"][data-id="${id}"]`)?.focus();
       return;
     }
+    case 'del-todo':
+      saveTodos(loadTodos().filter((t) => t.id !== id));
+      render();
+      $('#todo-input')?.focus();
+      return;
     case 'del-notice': {
       el.disabled = true;
       db(() => sb.from('notices').delete().eq('id', id).select()).then((res) => {
@@ -1858,6 +1870,12 @@ main.addEventListener('click', (e) => {
 
 main.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.dataset.action === 'toggle-todo') {
+    saveTodos(loadTodos().map((t) => (t.id === el.dataset.id ? { ...t, done: el.checked } : t)));
+    render();
+    main.querySelector(`[data-action="toggle-todo"][data-id="${el.dataset.id}"]`)?.focus();
+    return;
+  }
   if (el.dataset.action === 'set-status') {
     const f = state.followups.find((x) => x.id === el.dataset.id);
     if (!f) return;
@@ -1889,10 +1907,58 @@ main.addEventListener('input', (e) => {
   render();
 });
 
+/* ---------- Personal to-do list ----------
+   Kept in this browser only and cleared at the start of each new day. */
+
+const TODO_KEY = STORAGE_KEY + ':todos';
+
+function loadTodos() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TODO_KEY) || 'null');
+    return saved && saved.date === today() ? asList(saved.items) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveTodos(items) {
+  try {
+    localStorage.setItem(TODO_KEY, JSON.stringify({ date: today(), items }));
+  } catch (_) {
+    toast('Could not save the to-do list in this browser.', 'error');
+  }
+}
+
+function todoSection() {
+  const todos = loadTodos();
+  const left = todos.filter((t) => !t.done).length;
+  return section('To-do', left, `
+    ${todos.length ? `<ul class="todos">${todos.map((t) => `
+      <li class="${t.done ? 'done' : ''}">
+        <label class="check"><input type="checkbox" data-action="toggle-todo" data-id="${t.id}"${t.done ? ' checked' : ''}> <span>${esc(t.text)}</span></label>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="del-todo" data-id="${t.id}" aria-label="Remove to-do: ${esc(t.text)}">Remove</button></li>`).join('')}</ul>`
+      : emptyState('Nothing on your list. It clears each day.')}
+    <form class="inline-form" data-form="todo">
+      <label for="todo-input" class="sr-only">New to-do</label>
+      <input id="todo-input" name="text" placeholder="Add a to-do…" autocomplete="off">
+      <button type="submit" class="btn btn-sm">Add</button>
+    </form>`);
+}
+
+function addTodo(form) {
+  const input = form.elements.text;
+  const text = input.value.trim();
+  if (!text) return input.focus();
+  saveTodos([...loadTodos(), { id: crypto.randomUUID(), text, done: false }]);
+  render();
+  $('#todo-input')?.focus();
+}
+
 main.addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
+  if (form.dataset.form === 'todo') return addTodo(form);
   if (form.dataset.form !== 'notice') return;
   const input = form.elements.text;
   const text = input.value.trim();

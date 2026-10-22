@@ -228,6 +228,10 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
   display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;
   padding: 8px 10px; margin-bottom: 6px; background: var(--warn-soft); border-radius: 8px; font-size: .9rem;
 }
+.todos { list-style: none; margin: 0 0 10px; padding: 0; }
+.todos li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); }
+.todos li:first-child { border-top: 0; }
+.todos li.done span { text-decoration: line-through; color: var(--muted); }
 .inline-form { display: flex; gap: 8px; }
 .inline-form .btn { min-height: 40px; }
 .quick-links { list-style: none; margin: 0; padding: 0; }
