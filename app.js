@@ -1439,8 +1439,9 @@ function buildShiftNote(date, shift, building) {
 
   const labelled = (label, text) => bullet([run(label, 'b'), run(` ${text}`)]);
   const pending = (l, ifEmpty) => (l.pendingAction || ifEmpty ? [labelled('Pending:', l.pendingAction || ifEmpty)] : []);
+  // A category's entries (e.g. each guest suite update) are spaced apart like the top-level bullets.
   const category = (label, children) => (children.length
-    ? bullet([run(label, 'b')], children)
+    ? { ...bullet([run(label, 'b')], children), spaced: true }
     : bullet([run(label, 'b'), run(' NA', 'b')]));
   const vendorLine = (l) => {
     const name = who(l.unit);
@@ -1544,9 +1545,11 @@ function noteRunsHtml(runs) {
   }).join('');
 }
 
-function noteListHtml(items, depth) {
+/* spaced puts a blank line after every item but the last. An empty paragraph inside the
+   item is used because Outlook ignores margins on list items. */
+function noteListHtml(items, depth, spaced = false) {
   return `<ul style="margin-top:0;margin-bottom:0;padding-left:0.3in;list-style-type:${NOTE_BULLETS[Math.min(depth, 2)]}">` +
-    items.map((it) => `<li style="margin:0">${noteRunsHtml(it.runs)}${it.children.length ? noteListHtml(it.children, depth + 1) : ''}</li>`).join('') +
+    items.map((it, i) => `<li style="margin:0">${noteRunsHtml(it.runs)}${it.children.length ? noteListHtml(it.children, depth + 1, it.spaced) : ''}${spaced && i < items.length - 1 ? '<p style="margin:0">&nbsp;</p>' : ''}</li>`).join('') +
     '</ul>';
 }
 
@@ -1561,9 +1564,10 @@ function noteHtml(blocks) {
 function notePlain(blocks) {
   const out = [];
   const symbols = ['•', '○', '▪'];
-  const walk = (items, depth) => items.forEach((it) => {
+  const walk = (items, depth, spaced = false) => items.forEach((it, i) => {
+    if (spaced && i) out.push('');
     out.push(`${'    '.repeat(depth)}${symbols[Math.min(depth, 2)]} ${it.runs.map((r) => r.text).join('')}`);
-    walk(it.children, depth + 1);
+    walk(it.children, depth + 1, it.spaced);
   });
   blocks.forEach((b) => {
     if (b.type === 'blank') out.push('');
