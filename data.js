@@ -67,6 +67,35 @@ const VENDOR_UPDATES = {
   'HP Renovations': 'On site for'
 };
 
+/* Guest suites. Bookable ones are always filed under Guest Suite(s) in the shift note.
+   Contingency suites only when the line mentions a guest stay or nobody is listed in the unit. */
+const GUEST_SUITES = {
+  bookable: ['E1208', 'E1508', 'E0511', 'E0311'],
+  contingency: ['E0202', 'E0310', 'W1508', 'W1507', 'W1907', 'W1505', 'W2909', 'W2607'],
+};
+
+/* Extra keywords for the Quick log box, on top of the vendor, area and tracker names
+   (keyword: name to file it under). Keywords are lowercase. */
+const QUICK_ENTRY = {
+  vendors: {
+    wr: 'White Rose', eddy: 'Eddy Solutions', hp: 'HP Renovations',
+    rsf: 'RSF Guards/Security/Movers', guard: 'RSF Guards/Security/Movers', guards: 'RSF Guards/Security/Movers',
+    security: 'RSF Guards/Security/Movers', movers: 'RSF Guards/Security/Movers',
+  },
+  areas: {
+    lido: 'Ledbury LIDO', chutes: 'Ledbury Chutes', chute: 'Ledbury Chutes', curb: 'Curb Appeal',
+    dining: 'Dining / Boardroom', boardroom: 'Dining / Boardroom', yoga: 'Yoga Room', temple: 'The Temple',
+    'ski sim': 'Ski Simulator', 'f1 sim': 'F1 Simulator', elevator: 'Elevators',
+  },
+  trackers: {
+    'guest suite tracker': 'Guest Suite', 'live event tracker': 'Live Events', 'guest keycard': 'Guest Keycard', '4s': '4S & Corporate Stays',
+    'corporate stay': '4S & Corporate Stays', 'corporate stays': '4S & Corporate Stays', 'elevator oos': 'Elevator OOS', 'snow log': 'Snow Log',
+  },
+  eventWords: ['workshop', 'event', 'party', 'social', 'class', 'drive'],
+  // Written with these capitals wherever they appear in a note.
+  properNames: ['White Rose', 'Orkin', 'Rogers', 'Eddy Solutions', 'HP Renovations', 'FedEx', 'Amazon', 'Wi-Fi', 'Yardi'],
+};
+
 /* Sugge
 stions for free-text fields (people can still type their own value). */
 const SUGGESTIONS = {

@@ -233,6 +233,9 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 .todos li:first-child { border-top: 0; }
 .todos li.done label span { text-decoration: line-through; color: var(--muted); }
 .todo-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.quick-log { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.quick-log-dest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.quick-log-dest select { width: auto; max-width: 100%; min-height: 34px; }
 .inline-form { display: flex; gap: 8px; }
 .inline-form .btn { min-height: 40px; }
 .quick-links { list-style: none; margin: 0; padding: 0; }

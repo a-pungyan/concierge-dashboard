@@ -431,6 +431,7 @@ const ui = {
   fuFilters: { q: '', owner: '', status: 'active', priority: '', category: '' },
   resQuery: '',
   searchQ: '',
+  quick: { text: '', dest: '' }, // Quick log box; dest is set only when someone picks it by hand
 };
 
 /* ---------- Router ---------- */
@@ -455,6 +456,7 @@ function render() {
   const selStart = focusKey && active.selectionStart;
   main.dataset.view = view;
   main.innerHTML = VIEWS[view]();
+  refreshQuickLog();
   if (focusKey) {
     const el = main.querySelector(`[data-focus-key="${focusKey}"]`);
     if (el) {
@@ -596,6 +598,7 @@ function viewOverview() {
     ${quickAccessHtml()}
 
     <div class="overview-main">
+    ${quickLogHtml()}
     <div class="stats">
       <a class="stat" href="#logs"><span class="stat-value">${todaysLogs.length}</span><span class="stat-label">Logs today</span></a>
       ${stat('Open follow-ups', active.length, { status: 'active', owner: team })}
@@ -1049,6 +1052,7 @@ $('#log-sections').innerHTML = SECTIONS.map((sec) => `
 
 let logStep = 1;
 let logTodoId = '';         // to-do the open log was made from; checked off once saved
+let logFromQuick = false;   // the open log came from the Quick log box, which is cleared once saved
 let logDraft = {};          // field values kept while moving between steps and subtypes
 let logSubtypePreset = '';  // subtype to pre-select when editing
 
@@ -1164,8 +1168,9 @@ $('#log-back').addEventListener('click', () => {
 
 /* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }.
    duplicate copies an existing log into a new one, dated today for the current shift. */
-function openLogDialog(log, preset = {}, { duplicate = false, todoId = '' } = {}) {
+function openLogDialog(log, preset = {}, { duplicate = false, todoId = '', fromQuick = false } = {}) {
   logTodoId = todoId;
+  logFromQuick = fromQuick;
   if (log && !canEditLog(log)) return toast('Only the person who wrote this log can edit it.', 'error');
   logForm.reset();
   clearInvalid(logForm);
@@ -1187,6 +1192,10 @@ function openLogDialog(log, preset = {}, { duplicate = false, todoId = '' } = {}
   if (section) goToStep2();
   else { showLogStep(1); $('input[name="section"]', logForm).focus(); }
 }
+
+// Amenities are sub-typed by area (e.g. "curb_appeal"); other sections by the chosen subtype.
+const logSubtype = (sec, def, unit) => (sec.id === 'amenities_common_areas' ? (slugify(unit) || 'other') : def.id);
+const logCategory = (sec, def, category) => (sec.id === 'residents_guests' ? (category || 'General') : (sec.subtypes.length > 1 ? def.title : sec.title));
 
 logForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1220,10 +1229,9 @@ logForm.addEventListener('submit', async (e) => {
   ['touchpoint', 'gift', 'giftStatus', 'checkOut'].forEach((k) => { if (val(k)) details[k] = val(k); });
   const rec = {
     date: v.date, shift: v.shift, section: sec.id,
-    // Amenities are sub-typed by area (e.g. "curb_appeal"); other sections by the chosen subtype.
-    subtype: sec.id === 'amenities_common_areas' ? (slugify(val('unit')) || 'other') : def.id,
+    subtype: logSubtype(sec, def, val('unit')),
     unit: val('unit'),
-    category: sec.id === 'residents_guests' ? (v.category || 'General') : (sec.subtypes.length > 1 ? def.title : sec.title),
+    category: logCategory(sec, def, v.category),
     description: val('description'), actionTaken: val('actionTaken'), pendingAction: val('pendingAction'),
     guestSuite: val('guestSuite'), checkIn: v.checkIn || '', details,
   };
@@ -1248,6 +1256,7 @@ logForm.addEventListener('submit', async (e) => {
     })).select().single());
     if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
   }
+  if (logFromQuick) ui.quick = { text: '', dest: '' };
   if (logTodoId && !v.id) saveTodos(loadTodos().map((t) => (t.id === logTodoId ? { ...t, done: true } : t)));
   render();
   logDialog.close();
@@ -1880,6 +1889,10 @@ main.addEventListener('click', (e) => {
 
 main.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.id === 'quick-log-dest') {
+    ui.quick.dest = el.value;
+    return refreshQuickLog();
+  }
   if (el.dataset.action === 'toggle-todo') {
     saveTodos(loadTodos().map((t) => (t.id === el.dataset.id ? { ...t, done: el.checked } : t)));
     render();
@@ -1910,6 +1923,12 @@ main.addEventListener('input', (e) => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   const { name, value } = e.target;
+  if (form.dataset.form === 'quick-log') {
+    if (name !== 'text') return;
+    ui.quick.text = value;
+    if (!value.trim()) ui.quick.dest = ''; // a new note starts back on automatic
+    return refreshQuickLog();
+  }
   if (form.dataset.form === 'log-filters') ui.logFilters[name] = value;
   else if (form.dataset.form === 'fu-filters') ui.fuFilters[name] = value;
   else if (form.dataset.form === 'res-filters') ui.resQuery = value;
@@ -1958,33 +1977,104 @@ function todoSection() {
     </form>`);
 }
 
-/* Tidies a quick to-do like "e315 tristan needs to send proof" into a shift log draft:
-   the unit is matched to the resident list (E315 -> E0315 Tristan Lee) and the rest becomes
-   a sentence ("Tristan needs to send proof."). Without a unit, the type is chosen as usual. */
+/* The Quick log rules also tidy a to-do into a log draft. Without a match, the type is chosen as usual. */
 function todoToLog(text) {
-  let rest = text.replace(/\s+/g, ' ').trim();
-  let unit = '';
-  let name = '';
-  const m = rest.match(/^([EW])\s?-?(\d{3,4})\b[\s:,–-]*/i);
-  if (m) {
-    unit = m[1].toUpperCase() + m[2].padStart(4, '0');
-    rest = rest.slice(m[0].length);
-    const inUnit = occupants.filter((o) => String(o.unit).toUpperCase() === unit);
-    const word = rest.split(/[\s,:]/)[0].toLowerCase();
-    const who = word && inUnit.find((o) => String(o.first_name || '').split(' ')[0].toLowerCase() === word);
-    if (who) {
-      name = occLabel(who);
-      rest = String(who.first_name).split(' ')[0] + rest.slice(word.length); // proper-case the name
-    }
+  const dest = detectQuickDest(text, occupants);
+  if (!dest) return { actionTaken: tidySentence(text) };
+  const [section, subtype] = dest.split('/');
+  return { section, subtype, ...quickFields(dest, text, occupants) };
+}
+
+/* ---------- Quick log ----------
+   One line typed on the Overview, filed under the right heading by quick-entry.js. */
+
+const quickDest = () => ui.quick.dest || detectQuickDest(ui.quick.text, occupants);
+const destDef = (dest) => {
+  const [section, subtype] = dest.split('/');
+  return SECTION_BY_ID[section]?.subtypes.find((st) => st.id === subtype);
+};
+const destLabel = (sec, st) => (sec.subtypes.length > 1 ? `${sec.title} → ${st.title}` : sec.title);
+
+// Required fields the line didn't provide. An update ending in ":" is an unfinished vendor default.
+function quickMissing(dest, fields) {
+  const required = fieldsOf(destDef(dest)).filter((f) => f.required);
+  const missing = required.filter((f) => !fields[f.name]);
+  if (/:$/.test(fields.actionTaken || '')) missing.push(fieldsOf(destDef(dest)).find((f) => f.name === 'actionTaken'));
+  return missing;
+}
+
+function quickLogHtml() {
+  const options = SECTIONS.flatMap((sec) => sec.subtypes.map((st) => [`${sec.id}/${st.id}`, destLabel(sec, st)]));
+  return `
+    <form class="card quick-log" data-form="quick-log">
+      <label for="quick-log-input"><strong>Quick log</strong></label>
+      <div class="inline-form">
+        <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="Type a note, e.g. white rose on site for cleaning" autocomplete="off">
+        <button type="submit" class="btn btn-sm">Add</button>
+      </div>
+      <div class="quick-log-dest">
+        <label for="quick-log-dest" class="muted small">Goes to</label>
+        <select id="quick-log-dest" aria-describedby="quick-log-hint">
+          <option value="">Choose where this goes…</option>
+          ${options.map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('')}
+        </select>
+        <span id="quick-log-hint" class="muted small" aria-live="polite"></span>
+      </div>
+    </form>`;
+}
+
+// Updates the destination without a re-render, so typing isn't interrupted.
+function refreshQuickLog() {
+  const select = $('#quick-log-dest');
+  if (!select) return;
+  const dest = quickDest();
+  select.value = dest;
+  const text = ui.quick.text.trim();
+  let hint = '';
+  if (text && !dest) hint = "Couldn't place this. Choose where it goes.";
+  else if (text) {
+    const missing = quickMissing(dest, quickFields(dest, text, occupants));
+    if (missing.length) hint = `Will ask for: ${missing.map((f) => f.label).join(', ')}`;
   }
-  const sentence = rest
-    .replace(/\bi\b/g, 'I')
-    .replace(/\s+([,.!?])/g, '$1')
-    .replace(/(^|[.!?]\s+)([a-z])/g, (_, p, c) => p + c.toUpperCase())
-    .replace(/([^.!?])$/, '$1.');
-  return unit
-    ? { section: 'residents_guests', unit: name || unit, description: sentence }
-    : { actionTaken: sentence };
+  $('#quick-log-hint').textContent = hint;
+}
+
+async function submitQuickLog(form) {
+  const input = form.elements.text;
+  const text = input.value.trim();
+  if (!text) return input.focus();
+  const dest = quickDest();
+  if (!dest) {
+    toast('Choose where this note goes.', 'error');
+    return $('#quick-log-dest').focus();
+  }
+  const [section, subtype] = dest.split('/');
+  const fields = quickFields(dest, text, occupants);
+  const missing = quickMissing(dest, fields);
+  if (missing.length) {
+    openLogDialog(null, { section, subtype, ...fields }, { fromQuick: true });
+    return logForm.elements[missing[0].name]?.focus();
+  }
+  const sec = SECTION_BY_ID[section];
+  const def = destDef(dest);
+  const details = {};
+  ['touchpoint', 'gift', 'giftStatus', 'checkOut'].forEach((k) => { if (fields[k]) details[k] = fields[k]; });
+  const rec = {
+    date: today(), shift: currentShift(), section, subtype: logSubtype(sec, def, fields.unit), unit: fields.unit || '',
+    category: logCategory(sec, def, fields.category), description: fields.description || '', actionTaken: fields.actionTaken || '',
+    pendingAction: '', guestSuite: fields.guestSuite || '', checkIn: '', details,
+  };
+  const btn = $('button[type="submit"]', form);
+  setBusy(btn, true, 'Adding…');
+  const res = await db(() => sb.from('shift_logs').insert(logToRow(rec)).select().single());
+  setBusy(btn, false);
+  // On failure the typed text stays in the box so it can be retried.
+  if (!res.ok) return toast(`${res.error} Your note was not saved.`, 'error');
+  state.logs.push(logFromRow(res.data));
+  ui.quick = { text: '', dest: '' };
+  render();
+  toast(`Saved to ${destLabel(sec, def)}.`);
+  $('#quick-log-input')?.focus();
 }
 
 function addTodo(form) {
@@ -2001,6 +2091,7 @@ main.addEventListener('submit', async (e) => {
   if (!form) return;
   e.preventDefault();
   if (form.dataset.form === 'todo') return addTodo(form);
+  if (form.dataset.form === 'quick-log') return submitQuickLog(form);
   if (form.dataset.form !== 'notice') return;
   const input = form.elements.text;
   const text = input.value.trim();

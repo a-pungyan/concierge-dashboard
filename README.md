@@ -9,6 +9,7 @@ Open `index.html` in a browser. It needs no build step and no server, and it has
 ## Features
 
 - **Overview:** the day's tasks plus overdue, high-priority and upcoming follow-ups, important notices, recent shift activity and pinned quick links. You can filter by team (Concierge, Maintenance, Leasing, Property Management), so each team sees only its own actionable items.
+- **Quick log:** type one line on the Overview and it is filed under the right shift note heading using keyword rules. The destination can be changed before saving.
 - **Shift Log:** create and edit entries with unit or name, category, shift, action taken, pending action and date. A pending action can become a follow-up in one step.
 - **Follow-ups:** each one has an owner team, an optional assignee, a due date, a priority, a status, a next action and a resolution. Overdue items are flagged, and you can change the status from the table. Marking an item Done requires a resolution.
 - **Resources:** links to work systems, SharePoint trackers, SOPs, guides and contacts, with tips and tags. Pin a resource to show it on the Overview.
@@ -50,5 +51,6 @@ The script cleans the exports (header rows, unit spacing, units only shown on a 
 
 - `index.html` contains the page shell and dialogs.
 - `styles.css` contains the styles, including responsive layouts and a dark theme.
+- `quick-entry.js` contains the Quick log keyword rules. Their keywords and the guest suite list are in `data.js`.
 - `data.js` contains the options lists, fictional sample data and the test-record generator.
 - `app.js` contains storage, rendering, forms, search and the shift note generator.
