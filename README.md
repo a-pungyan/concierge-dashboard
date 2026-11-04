@@ -53,6 +53,8 @@ Pressing Enter in the Quick log saves the note straight away, filed by the keywo
 
 Quick log also suggests residents and vendors as you type. A vendor that isn't in `data.js` is suggested once it has been logged twice; deleting or correcting those logs removes it.
 
+Pasting rows from the guest suite tracker into the Quick log (unit, name, suite, check-in, check-out) creates one log per booking. Nothing is sent to Claude, and bookings already logged are skipped.
+
 To turn it on, get an API key from the Anthropic Console, set a monthly spend limit, then run from the project folder:
 
 ```

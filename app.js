@@ -431,7 +431,7 @@ const ui = {
   fuFilters: { q: '', owner: '', status: 'active', priority: '', category: '' },
   resQuery: '',
   searchQ: '',
-  quick: { text: '', dest: '', review: null }, // Quick log box; dest is set only when someone picks it by hand
+  quick: { text: '', dest: '', review: null, pasted: null }, // Quick log box; dest is set only when someone picks it by hand
 };
 
 /* ---------- Router ---------- */
@@ -1260,7 +1260,7 @@ logForm.addEventListener('submit', async (e) => {
     })).select().single());
     if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
   }
-  if (logFromQuick) ui.quick = { text: '', dest: '', review: null };
+  if (logFromQuick) ui.quick = { text: '', dest: '', review: null, pasted: null };
   if (logTodoId && !v.id) saveTodos(loadTodos().map((t) => (t.id === logTodoId ? { ...t, done: true } : t)));
   render();
   logDialog.close();
@@ -1483,7 +1483,7 @@ function buildShiftNote(date, shift, building) {
       bullet([run(`${guestSuiteHeading(l)}:`)], [
         bullet([run(`Booked by: ${who(l.unit)}`)]),
         ...(l.guestSuite ? [bullet([run(`Guest Suite: ${l.guestSuite}`)])] : []),
-        bullet([run(l.actionTaken)]),
+        ...(l.actionTaken ? [bullet([run(l.actionTaken)])] : []),
         ...pending(l),
       ]))),
     category('Event(s):', entries(ops, 'event').map((l) => bullet([run(`${who(l.unit)}: ${l.actionTaken}`)], pending(l)))),
@@ -1847,6 +1847,10 @@ main.addEventListener('click', (e) => {
       return t && openLogDialog(null, todoToLog(t.text), { todoId: t.id });
     }
     case 'quick-use-typed': return saveQuickAsTyped(el.closest('form'));
+    case 'quick-cancel-paste':
+      ui.quick.pasted = null;
+      render();
+      return $('#quick-log-input')?.focus();
     case 'quick-tidy': return tidyQuickLog(el.closest('form'), el);
     case 'del-todo':
       saveTodos(loadTodos().filter((t) => t.id !== id));
@@ -1930,6 +1934,10 @@ main.addEventListener('input', (e) => {
   if (!form) return;
   const { name, value } = e.target;
   if (form.dataset.form === 'quick-log') {
+    if (name === 'bookingNote') {
+      ui.quick.pasted.note = value;
+      return;
+    }
     if (name === 'review') {
       ui.quick.review.text = value;
       return refreshQuickLog();
@@ -2018,7 +2026,66 @@ function quickMissing(dest, fields) {
   return missing;
 }
 
+function quickBookingsHtml() {
+  const { bookings, unread, note } = ui.quick.pasted;
+  const day = (iso) => (iso ? fmtDate(iso, { month: 'short', day: 'numeric' }) : '?');
+  const fresh = bookings.filter((b) => !b.logged);
+  return `
+    <form class="card quick-log" data-form="quick-log">
+      <strong>${bookings.length} guest suite booking${bookings.length === 1 ? '' : 's'} found</strong>
+      <ul class="quick-log-bookings">
+        ${bookings.map((b) => `
+          <li${b.logged ? ' class="muted"' : ''}><strong>${esc(b.suite)}</strong> · ${esc(day(b.checkIn))} to ${esc(day(b.checkOut))} · Booked by ${esc(b.bookedBy || 'unknown')}
+            ${b.logged ? '· Already logged, skipping' : b.listed ? '' : '· Not on the guest suite list'}</li>`).join('')}
+      </ul>
+      ${unread ? `<p class="muted small">${unread} line${unread === 1 ? '' : 's'} couldn't be read and won't be saved.</p>` : ''}
+      <label for="quick-log-booking-note" class="muted small">Status / note for ${fresh.length === 1 ? 'this booking' : 'each booking'} (optional)</label>
+      <div class="inline-form">
+        <input id="quick-log-booking-note" name="bookingNote" data-focus-key="quick-booking-note" value="${esc(note)}" placeholder="e.g. Keys ready at the desk" autocomplete="off">
+        ${fresh.length ? `<button type="submit" class="btn btn-sm btn-primary">Save ${fresh.length} log${fresh.length === 1 ? '' : 's'}</button>` : ''}
+        <button type="button" class="btn btn-sm btn-ghost" data-action="quick-cancel-paste">Cancel</button>
+      </div>
+    </form>`;
+}
+
+/* Pasting tracker rows skips the single-line note and offers one log per booking. */
+function pasteQuickBookings(text) {
+  const parsed = parseGuestBookings(text, today());
+  if (!parsed) return false;
+  const logged = (b) => state.logs.some((l) => l.subtype === 'guest_suite' && l.guestSuite === b.suite
+    && l.checkIn === b.checkIn && (l.details?.checkOut || '') === b.checkOut);
+  ui.quick.pasted = { ...parsed, note: '', bookings: parsed.bookings.map((b) => ({ ...b, logged: logged(b) })) };
+  render();
+  $('#quick-log-booking-note')?.focus();
+  return true;
+}
+
+async function saveQuickBookings(form) {
+  const { bookings, note } = ui.quick.pasted;
+  const fresh = bookings.filter((b) => !b.logged);
+  if (!fresh.length) return;
+  const sec = SECTION_BY_ID.operations_events;
+  const def = destDef('operations_events/guest_suite');
+  const rows = fresh.map((b) => logToRow({
+    date: today(), shift: currentShift(), section: sec.id, subtype: def.id, unit: b.bookedBy,
+    category: logCategory(sec, def), description: '', actionTaken: note.trim(), pendingAction: '',
+    guestSuite: b.suite, checkIn: b.checkIn, details: b.checkOut ? { checkOut: b.checkOut } : {},
+  }));
+  const btn = $('button[type="submit"]', form);
+  setBusy(btn, true, 'Saving…');
+  // One request, so either every booking is saved or none are.
+  const res = await db(() => sb.from('shift_logs').insert(rows).select());
+  setBusy(btn, false);
+  if (!res.ok) return toast(`${res.error} These bookings were not saved.`, 'error');
+  state.logs.push(...res.data.map(logFromRow));
+  ui.quick.pasted = null;
+  render();
+  toast(`Saved ${rows.length} guest suite log${rows.length === 1 ? '' : 's'}.`);
+  $('#quick-log-input')?.focus();
+}
+
 function quickLogHtml() {
+  if (ui.quick.pasted) return quickBookingsHtml();
   const options = SECTIONS.flatMap((sec) => sec.subtypes.map((st) => [`${sec.id}/${st.id}`, destLabel(sec, st)]));
   return `
     <form class="card quick-log" data-form="quick-log">
@@ -2124,6 +2191,7 @@ function refreshQuickLog() {
 /* Enter saves straight away, filed by the keyword rules. Claude only runs when someone asks
    with the Tidy button, and its version is shown to check before saving. */
 async function submitQuickLog(form) {
+  if (ui.quick.pasted) return saveQuickBookings(form);
   closeQuickPicks();
   const input = form.elements.text;
   if (!input.value.trim()) return input.focus();
@@ -2213,7 +2281,7 @@ async function saveQuickLog(form, dest, fields, edited) {
   // On failure the typed text stays in the box so it can be retried.
   if (!res.ok) return toast(`${res.error} Your note was not saved.`, 'error');
   state.logs.push(logFromRow(res.data));
-  ui.quick = { text: '', dest: '', review: null };
+  ui.quick = { text: '', dest: '', review: null, pasted: null };
   render();
   toast(`Saved to ${destLabel(sec, def)}.`);
   $('#quick-log-input')?.focus();
@@ -2245,6 +2313,11 @@ main.addEventListener('keydown', (e) => {
     e.stopPropagation();
     closeQuickPicks();
   }
+});
+
+main.addEventListener('paste', (e) => {
+  if (e.target.id !== 'quick-log-input') return;
+  if (pasteQuickBookings(e.clipboardData?.getData('text') || '')) e.preventDefault();
 });
 
 // mousedown so the pick happens before the box loses focus.

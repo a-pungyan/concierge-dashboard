@@ -442,3 +442,65 @@ function quickAiFields(ai, dest, line, occupants) {
       return { ...main, ...entity };
   }
 }
+
+/* ---------- Pasted guest suite bookings ----------
+   Rows copied from the tracker, like "E2506 <tab> Name <tab> E1208 <tab> November 04 <tab> November 05".
+   Cells are recognized by what they contain, so the column order doesn't matter. */
+
+const QE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+function qeIso(year, month, day) {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCMonth() === month - 1 && d.getUTCDate() === day ? d.toISOString().slice(0, 10) : '';
+}
+
+// "November 04", "Nov 4, 2026", "4 Nov", "11/04", "11/04/2026" or "2026-11-04". Without a year,
+// it's the date closest to today, so a December paste of "January 03" means next January.
+function qeParseDate(cell, todayIso) {
+  const text = cell.trim().toLowerCase().replace(/,/g, ' ');
+  let month, day, year;
+  let m;
+  if ((m = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) [year, month, day] = [+m[1], +m[2], +m[3]];
+  else if ((m = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/))) [month, day, year] = [+m[1], +m[2], m[3] ? +m[3] : 0];
+  else if ((m = text.match(/^([a-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(\d{4}))?$/))) [month, day, year] = [QE_MONTHS.indexOf(m[1].slice(0, 3)) + 1, +m[2], m[3] ? +m[3] : 0];
+  else if ((m = text.match(/^(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})\.?(?:\s+(\d{4}))?$/))) [month, day, year] = [QE_MONTHS.indexOf(m[2].slice(0, 3)) + 1, +m[1], m[3] ? +m[3] : 0];
+  else return '';
+  if (!month) return '';
+  if (year && year < 100) year += 2000;
+  if (year) return qeIso(year, month, day);
+  const thisYear = +todayIso.slice(0, 4);
+  const iso = qeIso(thisYear, month, day);
+  if (!iso) return '';
+  const daysAway = (Date.parse(iso) - Date.parse(todayIso)) / 86400000;
+  return daysAway < -180 ? qeIso(thisYear + 1, month, day) : iso;
+}
+
+function qeParseBooking(line, todayIso) {
+  const cells = line.split(/\t| {2,}/).map((c) => c.trim()).filter(Boolean);
+  const units = [];
+  const dates = [];
+  const words = [];
+  cells.forEach((cell) => {
+    const unit = cell.match(/^([EW])-?(\d{3,4})$/i);
+    const date = qeParseDate(cell, todayIso);
+    if (unit) units.push(unit[1].toUpperCase() + unit[2].padStart(4, '0'));
+    else if (date) dates.push(date);
+    else words.push(cell);
+  });
+  const listed = [...GUEST_SUITES.bookable, ...GUEST_SUITES.contingency];
+  const suite = [...units].reverse().find((u) => listed.includes(u)) || (units.length > 1 ? units.at(-1) : '');
+  if (!suite || !dates.length) return null;
+  const [checkIn, secondDate = ''] = dates;
+  // A check-out that lands before the check-in crosses into the next year.
+  const checkOut = secondDate && secondDate < checkIn ? qeIso(+secondDate.slice(0, 4) + 1, +secondDate.slice(5, 7), +secondDate.slice(8, 10)) : secondDate;
+  const booker = units.filter((u) => u !== suite);
+  return { bookedBy: [...booker, ...words].join(' '), suite, checkIn, checkOut, listed: listed.includes(suite) };
+}
+
+/* Returns the bookings in pasted text, or null if it isn't booking rows. */
+function parseGuestBookings(text, todayIso) {
+  const lines = String(text || '').split(/\r?\n/).filter((l) => l.trim());
+  const rows = lines.map((l) => qeParseBooking(l, todayIso));
+  const bookings = rows.filter(Boolean);
+  return bookings.length ? { bookings, unread: rows.length - bookings.length } : null;
+}
