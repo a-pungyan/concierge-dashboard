@@ -1847,6 +1847,7 @@ main.addEventListener('click', (e) => {
       return t && openLogDialog(null, todoToLog(t.text), { todoId: t.id });
     }
     case 'quick-use-typed': return saveQuickAsTyped(el.closest('form'));
+    case 'quick-tidy': return tidyQuickLog(el.closest('form'), el);
     case 'del-todo':
       saveTodos(loadTodos().filter((t) => t.id !== id));
       render();
@@ -2028,7 +2029,8 @@ function quickLogHtml() {
             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="quick-log-picks">
           <ul id="quick-log-picks" class="quick-log-picks" role="listbox" aria-label="Suggestions" hidden></ul>
         </div>
-        ${ui.quick.review ? '' : '<button type="submit" class="btn btn-sm">Add</button>'}
+        ${ui.quick.review ? '' : `<button type="submit" class="btn btn-sm">Add</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="quick-tidy">Tidy with Claude</button>`}
       </div>
       ${ui.quick.review ? `
       <label for="quick-log-review" class="muted small">Claude's version. Edit it if needed, then press Enter to save.</label>
@@ -2119,25 +2121,28 @@ function refreshQuickLog() {
   $('#quick-log-hint').textContent = hint;
 }
 
-/* Enter sends the line to Claude and shows the result to check. A second Enter saves it.
-   If Claude can't be reached, the keyword rules file the line as written. */
+/* Enter saves straight away, filed by the keyword rules. Claude only runs when someone asks
+   with the Tidy button, and its version is shown to check before saving. */
 async function submitQuickLog(form) {
+  closeQuickPicks();
+  const input = form.elements.text;
+  if (!input.value.trim()) return input.focus();
+  if (ui.quick.review) return saveQuickLog(form, quickDest(), quickReviewFields(), quickEdited());
+  return saveQuickAsTyped(form);
+}
+
+async function tidyQuickLog(form, btn) {
   closeQuickPicks();
   const input = form.elements.text;
   const text = input.value.trim();
   if (!text) return input.focus();
-  if (ui.quick.review) return saveQuickLog(form, quickDest(), quickReviewFields(), quickEdited());
-  const btn = $('button[type="submit"]', form);
-  setBusy(btn, true, 'Checking…');
+  setBusy(btn, true, 'Tidying…');
   const ai = await askClaude(text);
   setBusy(btn, false);
-  if (ui.quick.text.trim() !== text) return; // the note was changed while waiting
-  if (ai) {
-    ui.quick.review = { ai, text: ai.text };
-    render();
-    return $('#quick-log-review')?.focus();
-  }
-  saveQuickAsTyped(form);
+  if (!ai || ui.quick.text.trim() !== text) return input.focus(); // failed, or the note changed while waiting
+  ui.quick.review = { ai, text: ai.text };
+  render();
+  $('#quick-log-review')?.focus();
 }
 
 function saveQuickAsTyped(form) {
@@ -2155,7 +2160,10 @@ function saveQuickAsTyped(form) {
 let quickAiMissing = false; // the function isn't deployed yet, so don't keep trying
 
 async function askClaude(text) {
-  if (quickAiMissing || !sb) return null;
+  if (quickAiMissing || !sb) {
+    toast("Claude isn't available right now. You can still save your note.", 'error');
+    return null;
+  }
   const { payload, swaps } = quickAiRequest(text, occupants, state.logs, ui.quick.dest);
   try {
     const timeout = new Promise((_, reject) => { setTimeout(() => reject(new Error('Timed out')), 15000); });
@@ -2166,7 +2174,7 @@ async function askClaude(text) {
   } catch (err) {
     console.error('Quick log AI:', err);
     if (err.context?.status === 404) quickAiMissing = true;
-    toast('Claude is unavailable, so the keyword rules were used.', 'error');
+    toast("Claude isn't available right now. You can still save your note.", 'error');
     return null;
   }
 }
