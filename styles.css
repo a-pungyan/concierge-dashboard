@@ -23,8 +23,9 @@
 
   /* Surfaces: adjust the look of the whole dashboard from here. */
   --bg-gradient: linear-gradient(180deg, #F2F3F6 0%, #EBEDF3 55%, #DFE2F0 100%);
-  --panel-opacity: .5;  /* main section panels */
-  --card-opacity: .8;   /* cards and log entries */
+  --panel-opacity: .25; /* main section panels */
+  --card-opacity: .42;  /* cards and log entries */
+  --log-action-opacity: .8; /* Duplicate and Edit on each log, a step above the card */
   --field-opacity: .97; /* inputs and other editable fields */
   --bar-opacity: .94;   /* top bar and tabs; the tabs stick while content scrolls under them */
   --panel-rgb: 255, 255, 255;
@@ -38,6 +39,26 @@
   --radius-panel: 28px;
   --radius-card: 20px;
   --radius-control: 12px;
+  --radius-pill: 999px;
+
+  /* Solid black fills: primary buttons, the logo tile and the selected team */
+  --fill-bg: #000000;
+  --fill-hover: #2b2b2b;
+  --fill-text: #ffffff;
+
+  /* Shift log types: the coloured label on each log */
+  --type-operations-bg: #B7C9EA;  /* blue */
+  --type-experience-bg: #121212;  /* charcoal */
+  --type-experience-text: #ffffff;
+  --type-gifts-bg: #F6BADB;       /* pink */
+  --type-residents-bg: #F3D86B;   /* yellow */
+  --type-amenities-bg: #9CA866;   /* olive */
+  --type-text: #1F2328;
+
+  /* Team filter */
+  --seg-active-bg: var(--fill-bg);
+  --seg-active-text: var(--fill-text);
+  --seg-slide: .28s cubic-bezier(.4, 0, .2, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -111,7 +132,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .brand-mark {
   width: 36px; height: 36px; border-radius: 9px; flex: none;
   display: grid; place-items: center; font-weight: 700; font-size: .85rem;
-  background: var(--accent); color: var(--accent-contrast);
+  background: var(--fill-bg); color: var(--fill-text);
 }
 .brand-name { font-weight: 650; white-space: nowrap; }
 .brand-sub { font-size: .78rem; color: var(--muted); white-space: nowrap; }
@@ -157,8 +178,8 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
   white-space: nowrap; text-decoration: none;
 }
 .btn:hover { background: var(--surface-2); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
-.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn-primary { background: var(--fill-bg); border-color: var(--fill-bg); color: var(--fill-text); }
+.btn-primary:hover { background: var(--fill-hover); border-color: var(--fill-hover); }
 .btn-ghost { background: transparent; border-color: transparent; }
 .btn-ghost:hover { background: var(--surface-2); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
@@ -180,7 +201,12 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
   font-size: .75rem; font-weight: 650; padding: 2px 8px; border-radius: 999px;
   border: 1px solid transparent;
 }
-.badge.cat { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+.badge.cat { background: var(--surface-2); color: var(--muted); font-weight: 450; }
+.badge.log-type-operations_events { background: var(--type-operations-bg); color: var(--type-text); }
+.badge.log-type-resident_experience { background: var(--type-experience-bg); color: var(--type-experience-text); }
+.badge.log-type-fitz_gifts { background: var(--type-gifts-bg); color: var(--type-text); }
+.badge.log-type-residents_guests { background: var(--type-residents-bg); color: var(--type-text); }
+.badge.log-type-amenities_common_areas { background: var(--type-amenities-bg); color: var(--type-text); }
 .pri-high { background: var(--danger-soft); color: var(--danger); }
 .pri-medium { background: var(--warn-soft); color: var(--warn); }
 .pri-low { background: var(--surface-2); color: var(--muted); }
@@ -207,12 +233,19 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 }
 
 .team-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; font-size: .9rem; }
-.segmented { display: flex; flex-wrap: wrap; gap: 4px; background: var(--surface-2); padding: 3px; border-radius: var(--radius-control); }
+.segmented { position: relative; isolation: isolate; display: flex; flex-wrap: wrap; gap: 4px; }
+.seg-thumb {
+  position: absolute; top: 0; left: 0; z-index: -1; pointer-events: none;
+  background: var(--seg-active-bg); border-radius: var(--radius-pill);
+  transition: transform var(--seg-slide), width var(--seg-slide), height var(--seg-slide);
+}
 .seg {
   font: inherit; font-size: .85rem; font-weight: 550; border: 0; background: transparent; color: var(--muted);
-  padding: 6px 12px; border-radius: calc(var(--radius-control) - 3px); cursor: pointer; min-height: 34px;
+  padding: 6px 14px; border-radius: var(--radius-pill); cursor: pointer; min-height: 34px;
+  transition: color var(--seg-slide);
 }
-.seg[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); outline: 1px solid var(--border); }
+.seg:hover { color: var(--text); }
+.seg[aria-pressed="true"] { color: var(--seg-active-text); }
 
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
 .stat {
@@ -279,6 +312,16 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 }
 .logs.compact .log { padding: 10px 12px; }
 .log-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 4px; }
+.log-head .btn-ghost {
+  background: rgba(var(--panel-rgb), var(--log-action-opacity));
+  border-color: var(--surface-border); border-radius: var(--radius-control);
+  transition: background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
+}
+/* Touch screens have no real hover, so a tapped button doesn't stay black. */
+@media (hover: hover) {
+  .log-head .btn-ghost:hover { background: var(--fill-bg); border-color: var(--fill-bg); color: var(--fill-text); }
+}
+.log-head .btn-ghost:active { transform: translateY(1px) scale(.95); }
 .log-unit { font-size: 1rem; }
 .log p { font-size: .92rem; }
 .pending { margin-top: 6px !important; padding: 6px 10px; background: var(--warn-soft); border-radius: var(--radius-control); }
@@ -356,7 +399,12 @@ dialog h2 { font-size: 1.2rem; }
 }
 .toast-error { background: var(--danger); color: #fff; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
-@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .seg, .seg-thumb { transition: none; }
+  .log-head .btn-ghost { transition: none; }
+  .log-head .btn-ghost:active { transform: none; }
+}
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1000px) {

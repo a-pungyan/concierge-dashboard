@@ -443,6 +443,52 @@ function currentView() {
   return VIEWS[v] ? v : 'overview';
 }
 
+/* ---------- Team filter ----------
+   One black pill sits behind the buttons and slides to the selected one. The buttons are
+   rebuilt on every render, so the slide starts from where the pill was before. */
+
+const teamThumbBox = () => {
+  const btn = $('.segmented .seg[aria-pressed="true"]');
+  return btn && { x: btn.offsetLeft, y: btn.offsetTop, width: btn.offsetWidth, height: btn.offsetHeight };
+};
+
+function moveTeamThumb(box) {
+  const thumb = $('.seg-thumb');
+  if (!thumb || !box) return;
+  thumb.style.transform = `translate(${box.x}px, ${box.y}px)`;
+  thumb.style.width = `${box.width}px`;
+  thumb.style.height = `${box.height}px`;
+}
+
+const placeTeamThumb = () => moveTeamThumb(teamThumbBox());
+window.addEventListener('resize', placeTeamThumb);
+document.fonts?.ready.then(placeTeamThumb); // the buttons change width when the font arrives
+
+function setTeam(team) {
+  if (team === ui.team) return;
+  const from = teamThumbBox();
+  const previous = ui.team;
+  ui.team = team;
+  render();
+  const button = (tm) => $$('.segmented .seg').find((b) => b.dataset.team === tm);
+  const thumb = $('.seg-thumb');
+  const moving = [thumb, button(team), button(previous)];
+
+  // Put everything back how it looked, without animating.
+  moving.forEach((el) => { el.style.transition = 'none'; });
+  moveTeamThumb(from);
+  button(team).style.color = 'var(--muted)';
+  button(previous).style.color = 'var(--seg-active-text)';
+  thumb.getBoundingClientRect(); // applies those styles before the transition starts
+
+  // Then let the pill slide over while the text colours swap.
+  moving.forEach((el) => { el.style.transition = ''; });
+  placeTeamThumb();
+  button(team).style.color = '';
+  button(previous).style.color = '';
+  button(team).focus({ preventScroll: true });
+}
+
 function render() {
   const view = currentView();
   $$('.tabs a').forEach((a) => {
@@ -457,6 +503,7 @@ function render() {
   main.dataset.view = view;
   refreshVendorList();
   main.innerHTML = VIEWS[view]();
+  placeTeamThumb();
   refreshQuickLog();
   if (focusKey) {
     const el = main.querySelector(`[data-focus-key="${focusKey}"]`);
@@ -519,7 +566,7 @@ function logItem(l, ts) {
     <article class="log">
       <div class="log-head">
         <strong class="log-unit">${hl(title, ts)}</strong>
-        <span class="badge cat">${hl(logTypeLabel(l), ts)}</span>
+        <span class="badge cat${SECTION_BY_ID[l.section] ? ` log-type-${l.section}` : ''}">${hl(logTypeLabel(l), ts)}</span>
         <span class="muted">${esc(l.shift)} · ${esc(fmtDate(l.date))} · <span title="${esc(l.author)}">by ${esc(authorLabel(l.author, l.createdBy))}</span></span>
         <span class="spacer"></span>
         <button type="button" class="btn btn-sm btn-ghost" data-action="duplicate-log" data-id="${l.id}" aria-label="Duplicate log: ${esc(title)}">Duplicate</button>
@@ -581,7 +628,7 @@ function viewOverview() {
     ${fuStatus === 'error' ? followupBanner() : ''}
     <div class="page-head">
       <div>
-        <h1>${greet}</h1>
+        <h1>${esc(currentUser?.name || greet)} :)</h1>
         <p class="muted">${esc(fmtDate(t, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))} · ${esc(currentShift())} shift<span class="weather" id="weather"${weatherText ? '' : ' hidden'}>${esc(weatherText)}</span></p>
       </div>
       <div class="actions">
@@ -592,7 +639,7 @@ function viewOverview() {
     </div>
     <div class="team-filter" role="group" aria-label="Show actionable items for">
       <span class="muted">Actionable items for:</span>
-      <div class="segmented">${teamButtons}</div>
+      <div class="segmented"><span class="seg-thumb" aria-hidden="true"></span>${teamButtons}</div>
     </div>
     </div>
 
@@ -1715,12 +1762,23 @@ function showLogin() {
   loginForm.elements.email.focus();
 }
 
+const displayName = (user) => user.user_metadata?.display_name || user.user_metadata?.full_name || user.user_metadata?.name || '';
+
+// The saved session can hold an old name, so check for the current one.
+async function refreshDisplayName() {
+  const { data } = await sb.auth.getUser().catch(() => ({ data: {} }));
+  if (!data?.user || data.user.id !== currentUser?.id || displayName(data.user) === currentUser.name) return;
+  currentUser.name = displayName(data.user);
+  render();
+}
+
 function onSignedIn(session) {
   document.body.classList.remove('signed-out');
   if (loginDialog.open) loginDialog.close();
   $('#account-email').textContent = session.user.email || '';
   $('#signout-btn').hidden = false;
-  currentUser = { id: session.user.id, email: session.user.email || '' };
+  currentUser = { id: session.user.id, email: session.user.email || '', name: displayName(session.user) };
+  refreshDisplayName();
   loadOccupants();
   loadCloud();
   loadResources();
@@ -1829,7 +1887,7 @@ main.addEventListener('click', (e) => {
     case 'new-res': return openResDialog();
     case 'edit-res': return openResDialog(state.resources.find((r) => r.id === id));
     case 'shift-note': return chooseBuilding();
-    case 'set-team': ui.team = el.dataset.team; return render();
+    case 'set-team': return setTeam(el.dataset.team);
     case 'goto-fu': {
       const f = JSON.parse(el.dataset.filter);
       ui.fuFilters = { q: '', owner: f.owner || '', status: f.status || 'active', priority: f.priority || '', category: '' };
