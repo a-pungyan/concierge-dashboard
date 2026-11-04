@@ -57,14 +57,15 @@ const WEATHER = {
 const VENDOR_UPDATES = {
   'White Rose': 'On site for cleaning.',
   'SPA': 'On site for pool maintenance.',
-  'SKY': 'On site for work in:',
-  'Orkin': 'On site for pest control in:',
-  'BOND': 'On site for:',
+  'SKY': 'On site for work in',
+  'Orkin': 'On site for pest control in',
+  'BOND': 'On site for',
   'Delta': 'On site for elevator:',
-  'Rogers': 'On site for:',
+  'Rogers': 'On site for',
   'RSF Guards/Security/Movers': 'On site for:',
   'Eddy Solutions': 'On site for',
-  'HP Renovations': 'On site for'
+  'HP Renovations': 'On site for',
+  'State Windows' : 'On site for glass work'
 };
 
 /* Guest suites. Bookable ones are always filed under Guest Suite(s) in the shift note.
@@ -93,6 +94,8 @@ const QUICK_ENTRY = {
   },
   eventWords: ['workshop', 'event', 'party', 'social', 'class', 'drive'],
   // Written with these capitals wherever they appear in a note.
+  // Resident names that are also everyday words: only hidden from Claude when capitalized.
+  commonWordNames: ['will', 'may', 'mark', 'small', 'white', 'hall', 'hunter', 'baker', 'inc', 'canada', 'st', 'al'],
   properNames: ['White Rose', 'Orkin', 'Rogers', 'Eddy Solutions', 'HP Renovations', 'FedEx', 'Amazon', 'Wi-Fi', 'Yardi'],
 };
 

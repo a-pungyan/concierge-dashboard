@@ -47,10 +47,23 @@ python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt   # fir
 
 The script cleans the exports (header rows, unit spacing, units only shown on a household's first line, duplicate lines and totals), combines them and replaces the `occupant_report` table with the result. Only unit, name and relationship are imported. It needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`. It runs on your computer only, because the service_role key must never be in the website.
 
+## Quick log with Claude
+
+The Quick log sends each line to Claude (Haiku) to tidy the wording and choose the heading. Resident names, emails and phone numbers are replaced with placeholders in the browser before sending and restored afterwards. If the function isn't deployed or Claude can't be reached, the keyword rules are used instead.
+
+To turn it on, get an API key from the Anthropic Console, set a monthly spend limit, then run from the project folder:
+
+```
+npx supabase login
+npx supabase secrets set ANTHROPIC_API_KEY=your-key --project-ref yodrtjrweyrnwnsqrcom
+npx supabase functions deploy quick-log-ai --project-ref yodrtjrweyrnwnsqrcom
+```
+
 ## Files
 
 - `index.html` contains the page shell and dialogs.
 - `styles.css` contains the styles, including responsive layouts and a dark theme.
 - `quick-entry.js` contains the Quick log keyword rules. Their keywords and the guest suite list are in `data.js`.
+- `supabase/functions/quick-log-ai/` is the server function that calls Claude for the Quick log.
 - `data.js` contains the options lists, fictional sample data and the test-record generator.
 - `app.js` contains storage, rendering, forms, search and the shift note generator.

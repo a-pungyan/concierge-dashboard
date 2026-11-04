@@ -431,7 +431,7 @@ const ui = {
   fuFilters: { q: '', owner: '', status: 'active', priority: '', category: '' },
   resQuery: '',
   searchQ: '',
-  quick: { text: '', dest: '' }, // Quick log box; dest is set only when someone picks it by hand
+  quick: { text: '', dest: '', review: null }, // Quick log box; dest is set only when someone picks it by hand
 };
 
 /* ---------- Router ---------- */
@@ -1227,6 +1227,9 @@ logForm.addEventListener('submit', async (e) => {
   const now = new Date().toISOString();
   const details = {};
   ['touchpoint', 'gift', 'giftStatus', 'checkOut'].forEach((k) => { if (val(k)) details[k] = val(k); });
+  // Keep what the Quick log learns from when a log is edited.
+  const quickLine = logFromQuick ? ui.quick.text.trim() : state.logs.find((l) => l.id === v.id)?.details?.quickLine;
+  if (quickLine) details.quickLine = quickLine;
   const rec = {
     date: v.date, shift: v.shift, section: sec.id,
     subtype: logSubtype(sec, def, val('unit')),
@@ -1256,7 +1259,7 @@ logForm.addEventListener('submit', async (e) => {
     })).select().single());
     if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
   }
-  if (logFromQuick) ui.quick = { text: '', dest: '' };
+  if (logFromQuick) ui.quick = { text: '', dest: '', review: null };
   if (logTodoId && !v.id) saveTodos(loadTodos().map((t) => (t.id === logTodoId ? { ...t, done: true } : t)));
   render();
   logDialog.close();
@@ -1842,6 +1845,7 @@ main.addEventListener('click', (e) => {
       const t = loadTodos().find((x) => x.id === id);
       return t && openLogDialog(null, todoToLog(t.text), { todoId: t.id });
     }
+    case 'quick-use-typed': return saveQuickAsTyped(el.closest('form'));
     case 'del-todo':
       saveTodos(loadTodos().filter((t) => t.id !== id));
       render();
@@ -1924,9 +1928,17 @@ main.addEventListener('input', (e) => {
   if (!form) return;
   const { name, value } = e.target;
   if (form.dataset.form === 'quick-log') {
+    if (name === 'review') {
+      ui.quick.review.text = value;
+      return refreshQuickLog();
+    }
     if (name !== 'text') return;
     ui.quick.text = value;
     if (!value.trim()) ui.quick.dest = ''; // a new note starts back on automatic
+    if (ui.quick.review) {
+      ui.quick.review = null; // Claude's version no longer matches the note
+      return render();
+    }
     return refreshQuickLog();
   }
   if (form.dataset.form === 'log-filters') ui.logFilters[name] = value;
@@ -1988,18 +2000,18 @@ function todoToLog(text) {
 /* ---------- Quick log ----------
    One line typed on the Overview, filed under the right heading by quick-entry.js. */
 
-const quickDest = () => ui.quick.dest || detectQuickDest(ui.quick.text, occupants);
+const quickDest = () => ui.quick.dest || ui.quick.review?.ai.destination || detectQuickDest(ui.quick.text, occupants);
 const destDef = (dest) => {
   const [section, subtype] = dest.split('/');
   return SECTION_BY_ID[section]?.subtypes.find((st) => st.id === subtype);
 };
 const destLabel = (sec, st) => (sec.subtypes.length > 1 ? `${sec.title} → ${st.title}` : sec.title);
 
-// Required fields the line didn't provide. An update ending in ":" is an unfinished vendor default.
+// Required fields the line didn't provide. An update with no final period is an unfinished vendor default.
 function quickMissing(dest, fields) {
   const required = fieldsOf(destDef(dest)).filter((f) => f.required);
   const missing = required.filter((f) => !fields[f.name]);
-  if (/:$/.test(fields.actionTaken || '')) missing.push(fieldsOf(destDef(dest)).find((f) => f.name === 'actionTaken'));
+  if (fields.actionTaken && !/[.!?]$/.test(fields.actionTaken)) missing.push(fieldsOf(destDef(dest)).find((f) => f.name === 'actionTaken'));
   return missing;
 }
 
@@ -2010,8 +2022,15 @@ function quickLogHtml() {
       <label for="quick-log-input"><strong>Quick log</strong></label>
       <div class="inline-form">
         <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="Type a note, e.g. white rose on site for cleaning" autocomplete="off">
-        <button type="submit" class="btn btn-sm">Add</button>
+        ${ui.quick.review ? '' : '<button type="submit" class="btn btn-sm">Add</button>'}
       </div>
+      ${ui.quick.review ? `
+      <label for="quick-log-review" class="muted small">Claude's version. Edit it if needed, then press Enter to save.</label>
+      <div class="inline-form">
+        <input id="quick-log-review" name="review" data-focus-key="quick-review" value="${esc(ui.quick.review.text)}" autocomplete="off">
+        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="quick-use-typed">Use my wording</button>
+      </div>` : ''}
       <div class="quick-log-dest">
         <label for="quick-log-dest" class="muted small">Goes to</label>
         <select id="quick-log-dest" aria-describedby="quick-log-hint">
@@ -2033,23 +2052,76 @@ function refreshQuickLog() {
   let hint = '';
   if (text && !dest) hint = "Couldn't place this. Choose where it goes.";
   else if (text) {
-    const missing = quickMissing(dest, quickFields(dest, text, occupants));
+    const missing = quickMissing(dest, ui.quick.review ? quickReviewFields() : quickFields(dest, text, occupants));
     if (missing.length) hint = `Will ask for: ${missing.map((f) => f.label).join(', ')}`;
   }
   $('#quick-log-hint').textContent = hint;
 }
 
+/* Enter sends the line to Claude and shows the result to check. A second Enter saves it.
+   If Claude can't be reached, the keyword rules file the line as written. */
 async function submitQuickLog(form) {
   const input = form.elements.text;
   const text = input.value.trim();
   if (!text) return input.focus();
+  if (ui.quick.review) return saveQuickLog(form, quickDest(), quickReviewFields(), quickEdited());
+  const btn = $('button[type="submit"]', form);
+  setBusy(btn, true, 'Checking…');
+  const ai = await askClaude(text);
+  setBusy(btn, false);
+  if (ui.quick.text.trim() !== text) return; // the note was changed while waiting
+  if (ai) {
+    ui.quick.review = { ai, text: ai.text };
+    render();
+    return $('#quick-log-review')?.focus();
+  }
+  saveQuickAsTyped(form);
+}
+
+function saveQuickAsTyped(form) {
+  ui.quick.review = null;
+  const text = ui.quick.text.trim();
   const dest = quickDest();
   if (!dest) {
+    render();
     toast('Choose where this note goes.', 'error');
     return $('#quick-log-dest').focus();
   }
+  return saveQuickLog(form, dest, quickFields(dest, text, occupants), false);
+}
+
+let quickAiMissing = false; // the function isn't deployed yet, so don't keep trying
+
+async function askClaude(text) {
+  if (quickAiMissing || !sb) return null;
+  const { payload, swaps } = quickAiRequest(text, occupants, state.logs, ui.quick.dest);
+  try {
+    const timeout = new Promise((_, reject) => { setTimeout(() => reject(new Error('Timed out')), 15000); });
+    const { data, error } = await Promise.race([sb.functions.invoke('quick-log-ai', { body: payload }), timeout]);
+    if (error) throw error;
+    if (!destDef(data?.destination || '') || !data.text) throw new Error('Unusable answer');
+    return Object.fromEntries(Object.entries(data).map(([k, v]) => [k, qeRestore(v, swaps)]));
+  } catch (err) {
+    console.error('Quick log AI:', err);
+    if (err.context?.status === 404) quickAiMissing = true;
+    toast('Claude is unavailable, so the keyword rules were used.', 'error');
+    return null;
+  }
+}
+
+const quickEdited = () => {
+  const { ai, text } = ui.quick.review;
+  return text.trim() !== ai.text || quickDest() !== ai.destination;
+};
+
+function quickReviewFields() {
+  const { ai, text } = ui.quick.review;
+  const dest = quickDest();
+  return { ...quickAiFields(ai, dest, ui.quick.text.trim(), occupants), [quickMainField(dest)]: text.trim() };
+}
+
+async function saveQuickLog(form, dest, fields, edited) {
   const [section, subtype] = dest.split('/');
-  const fields = quickFields(dest, text, occupants);
   const missing = quickMissing(dest, fields);
   if (missing.length) {
     openLogDialog(null, { section, subtype, ...fields }, { fromQuick: true });
@@ -2057,7 +2129,7 @@ async function submitQuickLog(form) {
   }
   const sec = SECTION_BY_ID[section];
   const def = destDef(dest);
-  const details = {};
+  const details = { quickLine: ui.quick.text.trim(), ...(edited ? { quickEdited: true } : {}) };
   ['touchpoint', 'gift', 'giftStatus', 'checkOut'].forEach((k) => { if (fields[k]) details[k] = fields[k]; });
   const rec = {
     date: today(), shift: currentShift(), section, subtype: logSubtype(sec, def, fields.unit), unit: fields.unit || '',
@@ -2065,13 +2137,13 @@ async function submitQuickLog(form) {
     pendingAction: '', guestSuite: fields.guestSuite || '', checkIn: '', details,
   };
   const btn = $('button[type="submit"]', form);
-  setBusy(btn, true, 'Adding…');
+  setBusy(btn, true, 'Saving…');
   const res = await db(() => sb.from('shift_logs').insert(logToRow(rec)).select().single());
   setBusy(btn, false);
   // On failure the typed text stays in the box so it can be retried.
   if (!res.ok) return toast(`${res.error} Your note was not saved.`, 'error');
   state.logs.push(logFromRow(res.data));
-  ui.quick = { text: '', dest: '' };
+  ui.quick = { text: '', dest: '', review: null };
   render();
   toast(`Saved to ${destLabel(sec, def)}.`);
   $('#quick-log-input')?.focus();

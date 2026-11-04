@@ -191,3 +191,120 @@ function quickFields(dest, line, occupants = []) {
       return { actionTaken: tidySentence(text) };
   }
 }
+
+/* ---------- Claude ----------
+   Only the unit number leaves the browser. Before a line is sent, every word matching a
+   resident's name becomes a placeholder like [P1], and emails and phone numbers do too.
+   The placeholders are swapped back when the answer returns. */
+
+let qeNameCache = { occupants: null, names: null, exempt: null };
+
+function qeNames(occupants) {
+  if (qeNameCache.occupants === occupants) return qeNameCache;
+  const names = new Map();
+  occupants.forEach((o) => [o.first_name, o.last_name].forEach((part) => {
+    const words = String(part || '').match(/[\p{L}][\p{L}'’-]+/gu) || [];
+    words.flatMap((w) => [w, ...w.split('-')]).forEach((w) => {
+      if (w.length > 1 && !names.has(w.toLowerCase())) names.set(w.toLowerCase(), w);
+    });
+  }));
+  // Words of the building's vendors, areas and trackers are never treated as names.
+  const known = [...Object.keys(qeVendors()), ...Object.keys(qeAreas()), ...Object.keys(qeTrackers()), ...QUICK_ENTRY.properNames];
+  const exempt = new Set(known.flatMap((k) => k.toLowerCase().split(/[^\p{L}]+/u)));
+  qeNameCache = { occupants, names, exempt };
+  return qeNameCache;
+}
+
+// A shared swaps list keeps one person on one placeholder across the line and the examples.
+function qeRedact(text, occupants, swaps) {
+  const { names, exempt } = qeNames(occupants);
+  const hold = (value) => {
+    let i = swaps.indexOf(value);
+    if (i < 0) i = swaps.push(value) - 1;
+    return `[P${i + 1}]`;
+  };
+  return String(text || '')
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, hold)
+    .replace(/(?<![\w-])\+?\d[\d\s().-]{7,}\d(?!\w)/g, hold)
+    .replace(/[\p{L}][\p{L}'’-]*/gu, (word) => {
+      const lower = word.toLowerCase();
+      if (!names.has(lower) || exempt.has(lower)) return word;
+      // "will" is a word and "Will" is a person. Common words only count when capitalized.
+      if (word === lower && QUICK_ENTRY.commonWordNames.includes(lower)) return word;
+      return hold(names.get(lower));
+    });
+}
+
+const qeRestore = (text, swaps) => String(text || '').replace(/\[P(\d+)\]/g, (_, n) => swaps[n - 1] ?? '');
+
+const qeWords = (text) => new Set(String(text || '').toLowerCase().match(/[\p{L}\d]{3,}/gu) || []);
+
+/* Past Quick log entries for Claude to learn from: the ones people corrected, then the ones
+   most like this line. Each goes out with names replaced and without the resident's unit label. */
+function quickExamples(line, logs, occupants, swaps, limit = 25) {
+  const words = qeWords(line);
+  const overlap = (l) => [...qeWords(l.details.quickLine)].filter((w) => words.has(w)).length;
+  const corrected = (l) => !!l.details.quickEdited || (!!l.updatedAt && l.updatedAt > l.createdAt);
+  const past = logs.filter((l) => l.details?.quickLine);
+  const fixes = past.filter(corrected).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')).slice(0, 10);
+  const similar = past.filter((l) => !fixes.includes(l)).sort((a, b) => overlap(b) - overlap(a)).slice(0, limit - fixes.length);
+  return [...fixes, ...similar].map((l) => {
+    const destination = `${l.section}/${l.section === 'amenities_common_areas' ? 'area' : l.subtype}`;
+    const hasEntity = ['vendor_contractor', 'logs_trackers', 'event', 'area'].includes(destination.split('/')[1]);
+    return {
+      note: qeRedact(l.details.quickLine, occupants, swaps),
+      destination,
+      ...(hasEntity ? { entity: qeRedact(l.unit, occupants, swaps) } : {}),
+      text: qeRedact(quickMainField(destination) === 'description' ? l.description : l.actionTaken, occupants, swaps),
+      ...(l.details.quickEdited || (l.updatedAt && l.updatedAt > l.createdAt) ? { corrected_by_staff: true } : {}),
+    };
+  });
+}
+
+const quickMainField = (dest) => (['resident', 'area'].includes(dest.split('/')[1]) ? 'description' : 'actionTaken');
+
+/* What gets sent to Claude for a line, plus the list needed to swap the names back. */
+function quickAiRequest(line, occupants, logs, fixedDest) {
+  const swaps = [];
+  const payload = {
+    line: qeRedact(line, occupants, swaps),
+    keyword_guess: detectQuickDest(line, occupants),
+    ...(fixedDest ? { fixed_destination: fixedDest } : {}),
+    examples: quickExamples(line, logs, occupants, swaps),
+    destinations: SECTIONS.flatMap((sec) => sec.subtypes.map((st) => ({
+      id: `${sec.id}/${st.id}`, section: sec.title, type: st.title, about: sec.desc,
+    }))),
+    categories: OPTIONS.categories,
+    vendors: SUGGESTIONS.vendors,
+    areas: SUGGESTIONS.areas,
+    trackers: SUGGESTIONS.trackers,
+    guest_suites: GUEST_SUITES,
+  };
+  return { payload, swaps };
+}
+
+/* Turns Claude's answer into form fields for a destination. The resident and the unit come
+   from the original line here in the browser, never from Claude. */
+function quickAiFields(ai, dest, line, occupants) {
+  const who = qeResident(qeTrim(line), occupants);
+  const resident = who ? { unit: who.unit } : {};
+  const main = { [quickMainField(dest)]: ai.text };
+  const entity = ai.entity ? { unit: ai.entity } : {};
+  switch (dest.split('/')[1]) {
+    case 'guest_suite': {
+      const suite = qeSuite(line, occupants) || qeUnits(line)[0];
+      return { ...main, ...(suite ? { guestSuite: suite.unit } : {}), ...(ai.booked_by ? { unit: ai.booked_by } : {}) };
+    }
+    case 'resident_touchpoint':
+      return { ...main, ...resident, touchpoint: ai.touchpoint || 'Other' };
+    case 'fitz_gift':
+      return { ...main, ...resident, gift: ai.gift || 'Fitz Gift', ...(ai.gift_status ? { giftStatus: ai.gift_status } : {}) };
+    case 'resident':
+      return { ...main, ...resident, category: ai.category || 'General' };
+    case 'general_operations':
+    case 'general_update':
+      return main;
+    default:
+      return { ...main, ...entity };
+  }
+}
