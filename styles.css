@@ -297,6 +297,8 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 }
 .quick-log-picks li { padding: 8px 10px; border-radius: calc(var(--radius-control) - 4px); cursor: pointer; }
 .quick-log-picks li:hover, .quick-log-picks li[aria-selected="true"] { background: var(--bg); }
+.quick-log-fu-toggle { margin-left: auto; }
+.quick-log-fu { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr)); gap: 12px; }
 .quick-log-bookings { margin: 0; padding-left: 18px; }
 .quick-log-bookings li { padding: 2px 0; }
 .quick-log-dest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -428,7 +430,8 @@ dialog h2 { font-size: 1.2rem; }
   .page-head .actions .btn { flex: 1; }
   .filters label, .filters label.grow { flex: 1 1 calc(50% - 10px); }
   .filters label.grow { flex-basis: 100%; }
-  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .grid-2, .grid-3, .quick-log-fu { grid-template-columns: 1fr; }
+  .quick-log-fu-toggle { margin-left: 0; }
   .res-grid { grid-template-columns: 1fr; }
   .item { flex-direction: column; gap: 6px; }
   .item-side { flex-direction: row; align-items: center; justify-content: space-between; }

@@ -425,6 +425,10 @@ function overdueBadge(f) {
 /* Residents from Supabase (occupant_report). Kept in memory only, never saved to browser storage. */
 let occupants = [];
 
+function emptyQuick() {
+  return { text: '', dest: '', review: null, pasted: null, fu: { on: false, title: '', owner: 'Concierge', due: '', priority: 'Medium' } };
+}
+
 const ui = {
   team: '',
   logFilters: { q: '', section: '', shift: '', from: '', to: '' },
@@ -432,7 +436,7 @@ const ui = {
   resQuery: '',
   searchQ: '',
   calMonth: '', // month shown in the small calendar; empty means this month
-  quick: { text: '', dest: '', review: null, pasted: null }, // Quick log box; dest is set only when someone picks it by hand
+  quick: emptyQuick(), // Quick log box; dest is set only when someone picks it by hand
 };
 
 /* ---------- Router ---------- */
@@ -1247,7 +1251,7 @@ $('#log-back').addEventListener('click', () => {
 
 /* preset can pre-fill a new log, e.g. { section: 'residents_guests', unit: 'E02 Dana Fox' }.
    duplicate copies an existing log into a new one, dated today for the current shift. */
-function openLogDialog(log, preset = {}, { duplicate = false, todoId = '', fromQuick = false } = {}) {
+function openLogDialog(log, preset = {}, { duplicate = false, todoId = '', fromQuick = false, followup = null } = {}) {
   logTodoId = todoId;
   logFromQuick = fromQuick;
   if (log && !canEditLog(log)) return toast('Only the person who wrote this log can edit it.', 'error');
@@ -1259,10 +1263,9 @@ function openLogDialog(log, preset = {}, { duplicate = false, todoId = '', fromQ
   logSubtypePreset = (editing ? log.subtype : preset.subtype) || '';
   $('#log-dialog-title').textContent = editing ? 'Edit shift log' : duplicate ? 'Duplicate shift log' : 'New shift log';
   $('[data-action="delete"]', logForm).hidden = !editing;
-  $('#log-followup-fields').hidden = editing;
   setFormValues(logForm, {
     id: editing ? log.id : '', date: editing ? log.date : today(), shift: editing ? log.shift : currentShift(),
-    makeFollowup: false, fuOwner: 'Concierge', fuDue: dayOffset(1), fuPriority: 'Medium',
+    makeFollowup: !!followup, fuOwner: followup?.owner || 'Concierge', fuDue: followup?.due || dayOffset(1), fuPriority: followup?.priority || 'Medium',
   });
   syncLogFollowupFields();
   const section = (editing ? log.section : preset.section) || '';
@@ -1271,6 +1274,21 @@ function openLogDialog(log, preset = {}, { duplicate = false, todoId = '', fromQ
   if (section) goToStep2();
   else { showLogStep(1); $('input[name="section"]', logForm).focus(); }
 }
+
+/* Adds a follow-up from a log's pending action. Returns the error, or '' if it saved. */
+async function scheduleFollowup(rec, { owner, due, priority }) {
+  const fu = await db(() => sb.from('followups').insert(fuToRow({
+    title: rec.pendingAction, unit: rec.unit,
+    category: OPTIONS.categories.includes(rec.category) ? rec.category : 'General',
+    owner, dueDate: due || dayOffset(1), priority, status: 'Open',
+  })).select().single());
+  if (!fu.ok) return fu.error;
+  state.followups.push(fuFromRow(fu.data));
+  return '';
+}
+
+const openFollowupExists = (rec) => state.followups.some((f) => f.status !== 'Done'
+  && f.title === rec.pendingAction && (f.unit || '') === (rec.unit || ''));
 
 // Amenities are sub-typed by area (e.g. "curb_appeal"); other sections by the chosen subtype.
 const logSubtype = (sec, def, unit) => (sec.id === 'amenities_common_areas' ? (slugify(unit) || 'other') : def.id);
@@ -1296,7 +1314,7 @@ logForm.addEventListener('submit', async (e) => {
     showFormError(logForm, 'The check-out date is before the check-in date.');
     return;
   }
-  const makeFu = !v.id && logForm.elements.makeFollowup.checked;
+  const makeFu = logForm.elements.makeFollowup.checked;
   if (makeFu && !val('pendingAction')) {
     logForm.elements.pendingAction.setAttribute('aria-invalid', 'true');
     logForm.elements.pendingAction.focus();
@@ -1330,20 +1348,17 @@ logForm.addEventListener('submit', async (e) => {
   if (i >= 0) state.logs[i] = saved; else state.logs.push(saved);
 
   let fuProblem = '';
-  if (makeFu) {
-    const fu = await db(() => sb.from('followups').insert(fuToRow({
-      title: rec.pendingAction, unit: rec.unit,
-      category: OPTIONS.categories.includes(rec.category) ? rec.category : 'General',
-      owner: v.fuOwner, dueDate: v.fuDue || dayOffset(1), priority: v.fuPriority, status: 'Open',
-    })).select().single());
-    if (fu.ok) state.followups.push(fuFromRow(fu.data)); else fuProblem = fu.error;
-  }
-  if (logFromQuick) ui.quick = { text: '', dest: '', review: null, pasted: null };
+  // Editing a log can schedule its follow-up, but saving it again won't make a second one.
+  const fuExists = makeFu && !!v.id && openFollowupExists(rec);
+  if (makeFu && !fuExists) fuProblem = await scheduleFollowup(rec, { owner: v.fuOwner, due: v.fuDue, priority: v.fuPriority });
+  if (logFromQuick) ui.quick = emptyQuick();
   if (logTodoId && !v.id) saveTodos(loadTodos().map((t) => (t.id === logTodoId ? { ...t, done: true } : t)));
   render();
   logDialog.close();
   if (fuProblem) toast(`Shift log saved, but the follow-up could not be saved: ${fuProblem}`, 'error');
-  else toast(v.id ? 'Shift log updated.' : makeFu ? 'Shift log and follow-up saved.' : 'Shift log saved.');
+  else if (fuExists) toast('Shift log updated. That follow-up is already scheduled.');
+  else if (makeFu) toast(v.id ? 'Shift log updated and follow-up scheduled.' : 'Shift log and follow-up saved.');
+  else toast(v.id ? 'Shift log updated.' : 'Shift log saved.');
 });
 
 $('[data-action="delete"]', logForm).addEventListener('click', async () => {
@@ -2036,6 +2051,16 @@ main.addEventListener('input', (e) => {
       ui.quick.review.text = value;
       return refreshQuickLog();
     }
+    if (name === 'fuOn') {
+      ui.quick.fu.on = e.target.checked;
+      render();
+      return $(ui.quick.fu.on ? '#quick-log-fu-title' : '#quick-log-input')?.focus();
+    }
+    if (name.startsWith('fu')) {
+      const key = { fuTitle: 'title', fuOwner: 'owner', fuDue: 'due', fuPriority: 'priority' }[name];
+      ui.quick.fu[key] = value;
+      return;
+    }
     if (name !== 'text') return;
     ui.quick.text = value;
     if (!value.trim()) ui.quick.dest = ''; // a new note starts back on automatic
@@ -2178,6 +2203,18 @@ async function saveQuickBookings(form) {
   $('#quick-log-input')?.focus();
 }
 
+function quickFollowupHtml() {
+  const { title, owner, due, priority } = ui.quick.fu;
+  const select = (name, values, current) => `<select name="${name}">${values.map((o) => `<option${o === current ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  return `
+    <div class="quick-log-fu">
+      <label class="quick-log-fu-title">What needs to happen?<input id="quick-log-fu-title" name="fuTitle" data-focus-key="quick-fu" value="${esc(title)}" placeholder="e.g. Leo to call resident" autocomplete="off"></label>
+      <label>Owner${select('fuOwner', OPTIONS.teams, owner)}</label>
+      <label>Due date<input type="date" name="fuDue" value="${esc(due || dayOffset(1))}"></label>
+      <label>Priority${select('fuPriority', OPTIONS.priorities, priority)}</label>
+    </div>`;
+}
+
 function quickLogHtml() {
   if (ui.quick.pasted) return quickBookingsHtml();
   const options = SECTIONS.flatMap((sec) => sec.subtypes.map((st) => [`${sec.id}/${st.id}`, destLabel(sec, st)]));
@@ -2207,7 +2244,9 @@ function quickLogHtml() {
           ${options.map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('')}
         </select>
         <span id="quick-log-hint" class="muted small" aria-live="polite"></span>
+        <label class="check quick-log-fu-toggle"><input type="checkbox" name="fuOn"${ui.quick.fu.on ? ' checked' : ''}> Schedule a follow-up</label>
       </div>
+      ${ui.quick.fu.on ? quickFollowupHtml() : ''}
     </form>`;
 }
 
@@ -2354,9 +2393,14 @@ function quickReviewFields() {
 
 async function saveQuickLog(form, dest, fields, edited) {
   const [section, subtype] = dest.split('/');
+  const fu = { ...ui.quick.fu, title: ui.quick.fu.title.trim(), due: ui.quick.fu.due || dayOffset(1) };
+  if (fu.on && !fu.title) {
+    toast('Add what needs to happen for the follow-up.', 'error');
+    return $('#quick-log-fu-title')?.focus();
+  }
   const missing = quickMissing(dest, fields);
   if (missing.length) {
-    openLogDialog(null, { section, subtype, ...fields }, { fromQuick: true });
+    openLogDialog(null, { section, subtype, ...fields, ...(fu.on ? { pendingAction: fu.title } : {}) }, { fromQuick: true, followup: fu.on ? fu : null });
     return logForm.elements[missing[0].name]?.focus();
   }
   const sec = SECTION_BY_ID[section];
@@ -2366,18 +2410,23 @@ async function saveQuickLog(form, dest, fields, edited) {
   const rec = {
     date: today(), shift: currentShift(), section, subtype: logSubtype(sec, def, fields.unit), unit: fields.unit || '',
     category: logCategory(sec, def, fields.category), description: fields.description || '', actionTaken: fields.actionTaken || '',
-    pendingAction: '', guestSuite: fields.guestSuite || '', checkIn: '', details,
+    pendingAction: fu.on ? fu.title : '', guestSuite: fields.guestSuite || '', checkIn: '', details,
   };
   const btn = $('button[type="submit"]', form);
   setBusy(btn, true, 'Saving…');
   const res = await db(() => sb.from('shift_logs').insert(logToRow(rec)).select().single());
-  setBusy(btn, false);
   // On failure the typed text stays in the box so it can be retried.
-  if (!res.ok) return toast(`${res.error} Your note was not saved.`, 'error');
+  if (!res.ok) {
+    setBusy(btn, false);
+    return toast(`${res.error} Your note was not saved.`, 'error');
+  }
   state.logs.push(logFromRow(res.data));
-  ui.quick = { text: '', dest: '', review: null, pasted: null };
+  const fuProblem = fu.on ? await scheduleFollowup(rec, fu) : '';
+  setBusy(btn, false);
+  ui.quick = emptyQuick();
   render();
-  toast(`Saved to ${destLabel(sec, def)}.`);
+  if (fuProblem) toast(`Note saved, but the follow-up could not be saved: ${fuProblem}`, 'error');
+  else toast(`Saved to ${destLabel(sec, def)}${fu.on ? ' and follow-up scheduled' : ''}.`);
   $('#quick-log-input')?.focus();
 }
 
