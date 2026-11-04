@@ -24,7 +24,40 @@ const qeKeywords = (names, aliases) => ({
   ...aliases,
 });
 const qeAreas = () => qeKeywords(SUGGESTIONS.areas, QUICK_ENTRY.areas);
-const qeVendors = () => qeKeywords(SUGGESTIONS.vendors, QUICK_ENTRY.vendors);
+const qeListedVendors = () => qeKeywords(SUGGESTIONS.vendors, QUICK_ENTRY.vendors);
+const qeVendors = () => ({ ...Object.fromEntries(learnedVendors.map((v) => [v.toLowerCase(), v])), ...qeListedVendors() });
+
+let learnedVendors = []; // vendors picked up from past logs, set by setLearnedVendors
+
+/* Vendors staff have logged at least twice that aren't on the list in data.js. One log isn't
+   enough, so a one-off typo never becomes a suggestion. Near-copies of a listed vendor are
+   treated as typos too, and a name made up only of resident names is taken to be a person
+   logged by mistake. Deleting or correcting those logs removes a learned vendor. */
+function findLearnedVendors(logs, occupants = []) {
+  const { names } = qeNames(occupants);
+  const isPerson = (key) => key.split(/[^\p{L}'’-]+/u).filter(Boolean).every((w) => names.has(w));
+  const listed = SUGGESTIONS.vendors.map((v) => v.toLowerCase());
+  const seen = new Map(); // lowercase name -> how often each spelling was used
+  logs.filter((l) => l.section === 'operations_events' && l.subtype === 'vendor_contractor').forEach((l) => {
+    const name = String(l.unit || '').replace(/\s+/g, ' ').trim();
+    const key = name.toLowerCase();
+    if (name.length < 2 || name.length > 60 || qeUnits(name).length || listed.includes(key) || isPerson(key)) return;
+    if (listed.some((v) => key.length >= 5 && qeEditDistance(key, v) <= 2)) return;
+    if (!seen.has(key)) seen.set(key, new Map());
+    seen.get(key).set(name, (seen.get(key).get(name) || 0) + 1);
+  });
+  return [...seen.values()]
+    .map((spellings) => [...spellings.entries()].sort((a, b) => b[1] - a[1]))
+    .map((sorted) => ({ name: sorted[0][0], uses: sorted.reduce((n, [, count]) => n + count, 0) }))
+    .filter((v) => v.uses >= 2)
+    .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name))
+    .map((v) => v.name);
+}
+
+function setLearnedVendors(logs, occupants) {
+  learnedVendors = findLearnedVendors(logs, occupants);
+  return learnedVendors;
+}
 const qeTrackers = () => qeKeywords(SUGGESTIONS.trackers.filter((t) => t !== 'Guest Suite'), QUICK_ENTRY.trackers);
 
 // Units are stored as a letter and four digits, so "e315" means E0315.
@@ -81,7 +114,9 @@ function qeResident(text, occupants) {
       && String(o.first_name || '').split(' ')[0].toLowerCase() === word);
     if (!person) return { unit: found.unit, rest };
     const first = String(person.first_name).split(' ')[0];
-    return { unit: occLabel(person), rest: rest.replace(new RegExp(`\\b${qeEscape(word)}\\b`, 'i'), first) };
+    // The name stays in the sentence, so a "for" in front of it is still needed.
+    const kept = `${text.slice(0, found.start)} ${text.slice(found.end)}`;
+    return { unit: occLabel(person), rest: kept.replace(new RegExp(`\\b${qeEscape(word)}\\b`, 'i'), first) };
   }
   for (const o of occupants) {
     const name = occName(o);
@@ -91,6 +126,103 @@ function qeResident(text, occupants) {
     }
   }
   return null;
+}
+
+/* ---------- Suggestions while typing ---------- */
+
+const qeNorm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+// How many single-letter edits apart two words are, so "mohamed" still finds "Mohammad".
+function qeEditDistance(a, b) {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
+// 0 = the name starts with what was typed, 1 = a later name does, 2 = close spelling, null = no match.
+function qeNameRank(o, query) {
+  const words = qeNorm(occName(o)).split(/[^\p{L}'’-]+/u).filter(Boolean);
+  if (words[0]?.startsWith(query) || qeNorm(occName(o)).startsWith(query)) return 0;
+  if (words.some((w) => w.startsWith(query))) return 1;
+  // Close spellings only for long words with the same start, so everyday words don't match.
+  const allowed = query.length >= 7 ? 2 : 1;
+  if (query.length >= 6 && words.some((w) => w.slice(0, 3) === query.slice(0, 3) && qeEditDistance(w, query) <= allowed)) return 2;
+  return null;
+}
+
+/* Vendors matching what's typed at the start of the line, which is where the rules look
+   for one. Matches the name, any word in it, or a keyword like "wr". */
+function qeVendorSuggestions(typed) {
+  const query = qeNorm(typed.trimStart());
+  if (query.length < 2 || /\d/.test(query)) return [];
+  const hit = (phrase) => {
+    const p = qeNorm(phrase);
+    return p.startsWith(query) || (!query.includes(' ') && p.split(/[^\p{L}]+/u).some((w) => w.startsWith(query)));
+  };
+  const aliases = Object.entries(QUICK_ENTRY.vendors);
+  return [...SUGGESTIONS.vendors, ...learnedVendors]
+    .filter((v) => hit(v) || aliases.some(([word, name]) => name === v && hit(word)))
+    .map((v) => ({
+      label: v, tag: VENDOR_UPDATES[v] ? `Vendor · ${VENDOR_UPDATES[v]}` : 'Vendor', insert: `${v} `, start: 0, end: typed.length,
+    }));
+}
+
+/* What can finish the word being typed: vendors first, then residents. Picking one replaces
+   start..end with insert, so the rules and the log's unit label work from there. */
+function quickSuggestions(text, cursor, occupants, limit = 6) {
+  if (/[^\s]/.test(text.charAt(cursor))) return null; // only while typing at the end of a word
+  const typed = text.slice(0, cursor);
+  if (!/[\p{L}\d'’-]$/u.test(typed)) return null;
+  const matches = [...qeVendorSuggestions(typed), ...qeResidentSuggestions(typed, occupants)].slice(0, limit);
+  return matches.length ? matches : null;
+}
+
+function qeResidentSuggestions(typed, occupants) {
+  const cursor = typed.length;
+  const last = typed.match(/[\p{L}\d][\p{L}\d'’-]*$/u);
+  if (!last) return [];
+  const start = last.index;
+  const earlier = qeUnits(typed.slice(0, start)).at(-1);
+  const unitAhead = earlier && /^[\s:,–-]*$/.test(typed.slice(earlier.end, start)) ? earlier : null;
+  const word = qeNorm(last[0]);
+  const fix = (o) => [o.unit, String(o.first_name || '').split(' ')[0]].filter(Boolean).join(' ');
+  const found = (matches, from, insert) => matches.map((o) => ({ label: occLabel(o), tag: o.tenant_category || '', insert: `${insert(o)} `, start: from, end: cursor }));
+
+  // A unit, whole or part: "e315", "w23".
+  const unit = last[0].match(/^([EW])-?(\d{2,4})$/i);
+  if (unit) {
+    const prefix = unit[1].toUpperCase() + unit[2];
+    const padded = unit[2].length === 3 ? unit[1].toUpperCase() + unit[2].padStart(4, '0') : '';
+    return found(occupants.filter((o) => {
+      const u = String(o.unit).toUpperCase();
+      return u.startsWith(prefix) || u === padded;
+    }), start, fix);
+  }
+
+  // A first name after its unit: only that unit's residents, and the unit isn't repeated.
+  if (unitAhead) {
+    const inUnit = occupants.filter((o) => String(o.unit).toUpperCase() === unitAhead.unit && qeNameRank(o, word) !== null);
+    return found(inUnit, start, (o) => String(o.first_name || '').split(' ')[0] || '');
+  }
+  // Once a line names a unit, other words are the note itself rather than another person.
+  if (qeUnits(typed).length) return [];
+
+  // "dana fo" searches the full name and replaces both words.
+  const before = typed.slice(0, start).match(/([\p{L}'’-]+)\s+$/u);
+  const pair = before ? `${qeNorm(before[1])} ${word}` : '';
+  const pairHits = pair ? occupants.filter((o) => qeNorm(occName(o)).startsWith(pair)) : [];
+  if (pairHits.length) return found(pairHits, before.index, fix);
+  if (word.length < 3 || qeNames(occupants).exempt.has(word)) return [];
+
+  const ranked = occupants
+    .map((o) => ({ o, rank: qeNameRank(o, word) }))
+    .filter((x) => x.rank !== null)
+    .sort((a, b) => a.rank - b.rank || occName(a.o).localeCompare(occName(b.o)));
+  return found(ranked.map((x) => x.o), start, fix);
 }
 
 const QE_TOUCHPOINT = /\b(30|75|120)[\s-]?days?\b(?!\s+notice)(\s+(touchpoint|call))?|\btouchpoints?\b/i;
@@ -209,7 +341,8 @@ function qeNames(occupants) {
     });
   }));
   // Words of the building's vendors, areas and trackers are never treated as names.
-  const known = [...Object.keys(qeVendors()), ...Object.keys(qeAreas()), ...Object.keys(qeTrackers()), ...QUICK_ENTRY.properNames];
+  // Learned vendors stay out of this: a person logged as a vendor mustn't stop being hidden.
+  const known = [...Object.keys(qeListedVendors()), ...Object.keys(qeAreas()), ...Object.keys(qeTrackers()), ...QUICK_ENTRY.properNames];
   const exempt = new Set(known.flatMap((k) => k.toLowerCase().split(/[^\p{L}]+/u)));
   qeNameCache = { occupants, names, exempt };
   return qeNameCache;
@@ -275,7 +408,8 @@ function quickAiRequest(line, occupants, logs, fixedDest) {
       id: `${sec.id}/${st.id}`, section: sec.title, type: st.title, about: sec.desc,
     }))),
     categories: OPTIONS.categories,
-    vendors: SUGGESTIONS.vendors,
+    // A learned vendor is only shared if it doesn't contain a resident's name.
+    vendors: [...SUGGESTIONS.vendors, ...learnedVendors.filter((v) => qeRedact(v, occupants, []) === v).slice(0, 50)],
     areas: SUGGESTIONS.areas,
     trackers: SUGGESTIONS.trackers,
     guest_suites: GUEST_SUITES,

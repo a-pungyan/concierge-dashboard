@@ -51,6 +51,8 @@ The script cleans the exports (header rows, unit spacing, units only shown on a 
 
 The Quick log sends each line to Claude (Haiku) to tidy the wording and choose the heading. Resident names, emails and phone numbers are replaced with placeholders in the browser before sending and restored afterwards. If the function isn't deployed or Claude can't be reached, the keyword rules are used instead.
 
+Quick log also suggests residents and vendors as you type. A vendor that isn't in `data.js` is suggested once it has been logged twice; deleting or correcting those logs removes it.
+
 To turn it on, get an API key from the Anthropic Console, set a monthly spend limit, then run from the project folder:
 
 ```

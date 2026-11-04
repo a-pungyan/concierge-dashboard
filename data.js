@@ -65,7 +65,7 @@ const VENDOR_UPDATES = {
   'RSF Guards/Security/Movers': 'On site for:',
   'Eddy Solutions': 'On site for',
   'HP Renovations': 'On site for',
-  'State Windows' : 'On site for glass work'
+  'State Windows' : 'On site for glass work.'
 };
 
 /* Guest suites. Bookable ones are always filed under Guest Suite(s) in the shift note.

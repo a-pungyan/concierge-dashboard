@@ -455,6 +455,7 @@ function render() {
   const focusKey = active && main.contains(active) ? active.dataset.focusKey : null;
   const selStart = focusKey && active.selectionStart;
   main.dataset.view = view;
+  refreshVendorList();
   main.innerHTML = VIEWS[view]();
   refreshQuickLog();
   if (focusKey) {
@@ -1937,8 +1938,9 @@ main.addEventListener('input', (e) => {
     if (!value.trim()) ui.quick.dest = ''; // a new note starts back on automatic
     if (ui.quick.review) {
       ui.quick.review = null; // Claude's version no longer matches the note
-      return render();
+      render();
     }
+    showQuickPicks($('#quick-log-input'));
     return refreshQuickLog();
   }
   if (form.dataset.form === 'log-filters') ui.logFilters[name] = value;
@@ -2021,7 +2023,11 @@ function quickLogHtml() {
     <form class="card quick-log" data-form="quick-log">
       <label for="quick-log-input"><strong>Quick log</strong></label>
       <div class="inline-form">
-        <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="Type a note, e.g. white rose on site for cleaning" autocomplete="off">
+        <div class="quick-log-field">
+          <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="Type a note, e.g. white rose on site for cleaning" autocomplete="off"
+            role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="quick-log-picks">
+          <ul id="quick-log-picks" class="quick-log-picks" role="listbox" aria-label="Suggestions" hidden></ul>
+        </div>
         ${ui.quick.review ? '' : '<button type="submit" class="btn btn-sm">Add</button>'}
       </div>
       ${ui.quick.review ? `
@@ -2040,6 +2046,61 @@ function quickLogHtml() {
         <span id="quick-log-hint" class="muted small" aria-live="polite"></span>
       </div>
     </form>`;
+}
+
+// Vendors from past logs join the suggestions, here and in the shift log form.
+let vendorListKey = null;
+function refreshVendorList() {
+  const key = setLearnedVendors(state.logs, occupants).join('|');
+  if (key === vendorListKey) return;
+  vendorListKey = key;
+  $('#vendor-list').innerHTML = [...SUGGESTIONS.vendors, ...learnedVendors].map((v) => `<option value="${esc(v)}"></option>`).join('');
+}
+
+let quickPicks = null; // the suggestions on screen, plus which one is highlighted
+
+function closeQuickPicks() {
+  quickPicks = null;
+  const list = $('#quick-log-picks');
+  if (!list) return;
+  list.hidden = true;
+  list.innerHTML = '';
+  const input = $('#quick-log-input');
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+}
+
+function showQuickPicks(input) {
+  const matches = quickSuggestions(input.value, input.selectionStart, occupants);
+  if (!matches) return closeQuickPicks();
+  quickPicks = { matches, active: -1 };
+  $('#quick-log-picks').innerHTML = matches.map((m, i) => `
+    <li id="quick-pick-${i}" role="option" aria-selected="false" data-pick="${i}">${esc(m.label)}${m.tag ? ` <span class="muted small">${esc(m.tag)}</span>` : ''}</li>`).join('');
+  $('#quick-log-picks').hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  input.removeAttribute('aria-activedescendant');
+}
+
+function highlightQuickPick(step) {
+  const total = quickPicks.matches.length;
+  quickPicks.active = (quickPicks.active + step + total + (quickPicks.active < 0 && step < 0 ? 1 : 0)) % total;
+  $$('#quick-log-picks li').forEach((li, i) => {
+    li.setAttribute('aria-selected', String(i === quickPicks.active));
+  });
+  $('#quick-log-input').setAttribute('aria-activedescendant', `quick-pick-${quickPicks.active}`);
+}
+
+function chooseQuickPick(i) {
+  const input = $('#quick-log-input');
+  const { start, end, insert } = quickPicks.matches[i];
+  const after = input.value.slice(end).replace(/^ /, '');
+  input.value = input.value.slice(0, start) + insert + after;
+  const cursor = start + insert.length;
+  closeQuickPicks();
+  input.focus();
+  input.setSelectionRange(cursor, cursor);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  closeQuickPicks(); // the name was just chosen, so don't suggest it again
 }
 
 // Updates the destination without a re-render, so typing isn't interrupted.
@@ -2061,6 +2122,7 @@ function refreshQuickLog() {
 /* Enter sends the line to Claude and shows the result to check. A second Enter saves it.
    If Claude can't be reached, the keyword rules file the line as written. */
 async function submitQuickLog(form) {
+  closeQuickPicks();
   const input = form.elements.text;
   const text = input.value.trim();
   if (!text) return input.focus();
@@ -2157,6 +2219,37 @@ function addTodo(form) {
   render();
   $('#todo-input')?.focus();
 }
+
+/* Arrow keys and Tab choose a suggestion. Enter only picks one that was arrowed to, so a
+   note can always be submitted even when a word happens to match a suggestion. */
+main.addEventListener('keydown', (e) => {
+  if (e.target.id !== 'quick-log-input' || !quickPicks) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    highlightQuickPick(e.key === 'ArrowDown' ? 1 : -1);
+  } else if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault();
+    chooseQuickPick(Math.max(quickPicks.active, 0));
+  } else if (e.key === 'Enter' && quickPicks.active >= 0) {
+    e.preventDefault();
+    chooseQuickPick(quickPicks.active);
+  } else if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeQuickPicks();
+  }
+});
+
+// mousedown so the pick happens before the box loses focus.
+main.addEventListener('mousedown', (e) => {
+  const item = e.target.closest('[data-pick]');
+  if (!item) return;
+  e.preventDefault();
+  chooseQuickPick(Number(item.dataset.pick));
+});
+
+main.addEventListener('focusout', (e) => {
+  if (e.target.id === 'quick-log-input') closeQuickPicks();
+});
 
 main.addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-form]');

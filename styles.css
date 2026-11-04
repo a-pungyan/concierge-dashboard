@@ -234,6 +234,14 @@ label.check input { width: 18px; height: 18px; min-height: 0; }
 .todos li.done label span { text-decoration: line-through; color: var(--muted); }
 .todo-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .quick-log { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.quick-log-field { position: relative; flex: 1; min-width: 0; }
+.quick-log-field input { width: 100%; }
+.quick-log-picks {
+  position: absolute; z-index: 20; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+}
+.quick-log-picks li { padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.quick-log-picks li:hover, .quick-log-picks li[aria-selected="true"] { background: var(--bg); }
 .quick-log-dest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .quick-log-dest select { width: auto; max-width: 100%; min-height: 34px; }
 .inline-form { display: flex; gap: 8px; }
