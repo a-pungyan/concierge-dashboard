@@ -431,6 +431,7 @@ const ui = {
   fuFilters: { q: '', owner: '', status: 'active', priority: '', category: '' },
   resQuery: '',
   searchQ: '',
+  calMonth: '', // month shown in the small calendar; empty means this month
   quick: { text: '', dest: '', review: null, pasted: null }, // Quick log box; dest is set only when someone picks it by hand
 };
 
@@ -693,8 +694,38 @@ function quickAccessUrl(link) {
   return state.resources.find((r) => r.name.trim().toLowerCase() === target)?.url || '';
 }
 
+/* Small month calendar above the quick links, with a circle on today's date. */
+function miniCalendarHtml() {
+  const now = today();
+  const month = ui.calMonth || now.slice(0, 7);
+  const [y, m] = month.split('-').map(Number);
+  const blanks = (new Date(y, m - 1, 1).getDay() + 6) % 7; // weeks start on Monday
+  const total = new Date(y, m, 0).getDate();
+  const cells = [...Array(blanks).fill(0), ...Array.from({ length: total }, (_, i) => i + 1)];
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const dayCell = (d) => {
+    if (!d) return '<td></td>';
+    const isToday = `${month}-${String(d).padStart(2, '0')}` === now;
+    return `<td><span class="cal-day${isToday ? ' is-today' : ''}"${isToday ? ' aria-current="date"' : ''}>${d}</span></td>`;
+  };
+  const days = [['Mo', 'Monday'], ['Tu', 'Tuesday'], ['We', 'Wednesday'], ['Th', 'Thursday'], ['Fr', 'Friday'], ['Sa', 'Saturday'], ['Su', 'Sunday']];
+  return `
+    <section class="quick-card mini-cal" aria-labelledby="mini-cal-title">
+      <div class="mini-cal-head">
+        <h2 id="mini-cal-title" aria-live="polite">${esc(new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }))}</h2>
+        <button type="button" class="cal-nav" data-action="cal-step" data-step="-1" data-focus-key="cal-prev" aria-label="Previous month">‹</button>
+        <button type="button" class="cal-nav" data-action="cal-step" data-step="1" data-focus-key="cal-next" aria-label="Next month">›</button>
+      </div>
+      <table>
+        <thead><tr>${days.map(([short, full]) => `<th scope="col" abbr="${full}">${short}</th>`).join('')}</tr></thead>
+        <tbody>${weeks.map((week) => `<tr>${[...week, ...Array(7 - week.length).fill(0)].map(dayCell).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </section>`;
+}
+
 function quickAccessHtml() {
-  return `<aside class="quick-access" aria-label="Quick access">${QUICK_ACCESS.map((group) => `
+  return `<aside class="quick-access" aria-label="Quick access">${miniCalendarHtml()}${QUICK_ACCESS.map((group) => `
     <section class="quick-card">
       <h2>${esc(group.title)}</h2>
       <ul>${group.links.map((link) => {
@@ -1888,6 +1919,11 @@ main.addEventListener('click', (e) => {
     case 'edit-res': return openResDialog(state.resources.find((r) => r.id === id));
     case 'shift-note': return chooseBuilding();
     case 'set-team': return setTeam(el.dataset.team);
+    case 'cal-step': {
+      const [y, m] = (ui.calMonth || today().slice(0, 7)).split('-').map(Number);
+      ui.calMonth = isoDate(new Date(y, m - 1 + Number(el.dataset.step), 1)).slice(0, 7);
+      return render();
+    }
     case 'goto-fu': {
       const f = JSON.parse(el.dataset.filter);
       ui.fuFilters = { q: '', owner: f.owner || '', status: f.status || 'active', priority: f.priority || '', category: '' };

@@ -103,27 +103,23 @@ function qeSuite(text, occupants) {
   }) || null;
 }
 
-/* Who the line is about: a unit (plus the resident, if their first name follows it) or a full name. */
+/* Who the line is about: a unit (plus the resident, if their first name follows it) or a full
+   name. The log shows the person in its unit label, so their name is taken out of the note. */
 function qeResident(text, occupants) {
   const found = qeUnits(text)[0];
   if (found) {
-    const rest = qeCut(text, found);
-    const after = text.slice(found.end).replace(/^[\s:,–-]+/, '');
-    const word = after.split(/[\s,:]/)[0].toLowerCase();
+    const after = text.slice(found.end);
+    const gap = after.match(/^[\s:,–-]*/)[0].length;
+    const word = after.slice(gap).split(/[\s,:]/)[0].toLowerCase();
     const person = word && occupants.find((o) => String(o.unit).toUpperCase() === found.unit
       && String(o.first_name || '').split(' ')[0].toLowerCase() === word);
-    if (!person) return { unit: found.unit, rest };
-    const first = String(person.first_name).split(' ')[0];
-    // The name stays in the sentence, so a "for" in front of it is still needed.
-    const kept = `${text.slice(0, found.start)} ${text.slice(found.end)}`;
-    return { unit: occLabel(person), rest: kept.replace(new RegExp(`\\b${qeEscape(word)}\\b`, 'i'), first) };
+    if (!person) return { unit: found.unit, rest: qeCut(text, found) };
+    return { unit: occLabel(person), code: found.unit, rest: qeCut(text, { start: found.start, end: found.end + gap + word.length }) };
   }
   for (const o of occupants) {
     const name = occName(o);
     const at = name.includes(' ') ? qeFind(text, name) : -1;
-    if (at >= 0) {
-      return { unit: occLabel(o), rest: `${text.slice(0, at)}${o.first_name}${text.slice(at + name.length)}` };
-    }
+    if (at >= 0) return { unit: occLabel(o), code: o.unit, rest: qeCut(text, { start: at, end: at + name.length }) };
   }
   return null;
 }
@@ -399,8 +395,10 @@ const quickMainField = (dest) => (['resident', 'area'].includes(dest.split('/')[
 /* What gets sent to Claude for a line, plus the list needed to swap the names back. */
 function quickAiRequest(line, occupants, logs, fixedDest) {
   const swaps = [];
+  // Without the resident's name, so Claude can't write it into the note.
+  const who = qeResident(qeTrim(line), occupants);
   const payload = {
-    line: qeRedact(line, occupants, swaps),
+    line: qeRedact(who?.code ? `${who.code} ${qeTrim(who.rest)}` : line, occupants, swaps),
     keyword_guess: detectQuickDest(line, occupants),
     ...(fixedDest ? { fixed_destination: fixedDest } : {}),
     examples: quickExamples(line, logs, occupants, swaps),

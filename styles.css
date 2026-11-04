@@ -55,6 +55,10 @@
   --type-amenities-bg: #9CA866;   /* olive */
   --type-text: #1F2328;
 
+  /* Today's circle on the small calendar */
+  --today-bg: #F2B8D9;
+  --today-text: #1F2328;
+
   /* Team filter */
   --seg-active-bg: var(--fill-bg);
   --seg-active-text: var(--fill-text);
@@ -521,7 +525,8 @@ main[data-view="overview"] { max-width: none; padding-inline: 24px; }
 .overview-layout {
   display: grid;
   grid-template-columns: 196px minmax(0, 1fr);
-  grid-template-areas: ". head" "side main";
+  grid-template-areas: "side head" "side main";
+  grid-template-rows: auto 1fr;
   column-gap: 24px;
   align-items: start;
 }
@@ -533,6 +538,24 @@ main[data-view="overview"] { max-width: none; padding-inline: 24px; }
   box-shadow: var(--shadow); padding: 12px 14px;
 }
 .quick-card h2 { font-size: .88rem; margin-bottom: 6px; }
+.mini-cal-head { display: flex; align-items: center; gap: 2px; margin-bottom: 6px; }
+.mini-cal-head h2 { flex: 1; margin: 0; min-width: 0; }
+.cal-nav {
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+  font: inherit; font-size: 1rem; line-height: 1; color: var(--text); background: transparent;
+  transition: background .15s ease, color .15s ease;
+}
+.mini-cal table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.mini-cal th { padding: 0 0 2px; font-size: .68rem; font-weight: 550; color: var(--muted); text-align: center; }
+.mini-cal td { padding: 1px 0; text-align: center; }
+.cal-day {
+  display: inline-grid; place-items: center; width: 100%; max-width: 24px; aspect-ratio: 1;
+  font-size: .74rem; font-variant-numeric: tabular-nums; border-radius: 50%;
+}
+.cal-day.is-today { background: var(--today-bg); color: var(--today-text); font-weight: 650; }
+@media (hover: hover) {
+  .cal-nav:hover { background: var(--fill-bg); color: var(--fill-text); }
+}
 .quick-card ul { list-style: none; margin: 0; padding: 0; }
 .quick-card li { font-size: .84rem; line-height: 1.35; padding: 2px 0; overflow-wrap: anywhere; }
 .quick-card a { color: var(--text); text-decoration: none; }
@@ -545,7 +568,8 @@ main[data-view="overview"] { max-width: none; padding-inline: 24px; }
   .overview-layout { grid-template-columns: 172px minmax(0, 1fr); column-gap: 16px; }
 }
 @media (max-width: 860px) {
-  .overview-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "side" "main"; }
+  .overview-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "side" "main"; grid-template-rows: none; }
+  .mini-cal { display: none; } /* keeps the Quick log near the top on phones */
   .quick-access { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .weather { display: block; margin-left: 0; }
 }
