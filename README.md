@@ -29,23 +29,25 @@ Keyboard shortcuts: `/` search · `L` new shift log · `F` new follow-up · `N` 
 - If a save fails, an error appears and whatever was entered stays in the form so you can retry.
 - The code contains no passwords or secret keys (the Supabase anon key is designed to be public).
 
-## Updating residents from Yardi
+## Resident Data Import
 
-Export three Occupant Reports from Yardi as Excel and save them in the project folder, replacing last time's files:
+The dashboard includes a Python-based data import utility designed to process structured Excel reports and synchronize resident records with a database.
 
-- `residents.xlsx`: current residents
-- `future.xlsx`: future residents (moving in, or moved in but still "Future" in Yardi)
-- `notice.xlsx`: residents on notice (still living here, but moving out)
+### Features
 
-Then run this from the project folder:
+- **Excel Processing:** Processes multiple Excel files using Python.
+- **Data Cleaning:** Standardizes inconsistent data formats, removes duplicate records, and eliminates unnecessary report headers.
+- **Data Consolidation:** Combines multiple datasets into a consistent database structure.
+- **Database Integration:** Synchronizes processed records with Supabase.
+- **Preview Mode:** Allows changes to be reviewed before applying database updates.
+- **Credential Security:** Uses environment variables to securely manage database credentials.
 
-```
-python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt   # first time only
-.venv/bin/python tools/import_residents.py            # preview, changes nothing
-.venv/bin/python tools/import_residents.py --apply    # replace occupant_report
-```
+### Data Privacy
 
-The script cleans the exports (header rows, unit spacing, units only shown on a household's first line, duplicate lines and totals), combines them and replaces the `occupant_report` table with the result. Only unit, name and relationship are imported. It needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in `.env`. It runs on your computer only, because the service_role key must never be in the website.
+The public repository is intended to contain only application code and non-sensitive demonstration materials.
+
+Real resident information, proprietary reports, and database credentials must not be included. Synthetic sample data should be used for development and demonstrations.
+
 
 ## Quick log with Claude
 
