@@ -39,6 +39,11 @@
 
   <main id="main" tabindex="-1"></main>
 
+  <button type="button" class="btn sticky-toggle" id="sticky-toggle" aria-expanded="false" aria-controls="scratch-note">Sticky Note</button>
+  <aside class="scratch-note" id="scratch-note" aria-label="Personal sticky note" hidden>
+    <header><button type="button" class="btn btn-sm btn-ghost" id="sticky-close" aria-label="Close sticky note">×</button></header>
+    <textarea id="scratch-text" aria-label="Personal note" placeholder="Write a note…"></textarea>
+  </aside>
   <div class="toast-region" id="toasts" role="status" aria-live="polite"></div>
 
   <!-- Shift log dialog: step 1 picks the shift-note section, step 2 shows that type's form -->
@@ -232,5 +237,6 @@
   <script src="data.js"></script>
   <script src="quick-entry.js"></script>
   <script src="app.js"></script>
+  <script src="sticky-note.js"></script>
 </body>
 </html>

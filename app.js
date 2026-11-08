@@ -633,42 +633,35 @@ function viewOverview() {
     ${fuStatus === 'error' ? followupBanner() : ''}
     <div class="page-head">
       <div>
-        <h1>${esc(currentUser?.name || greet)} :)</h1>
-        <p class="muted">${esc(fmtDate(t, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))} · ${esc(currentShift())} shift<span class="weather" id="weather"${weatherText ? '' : ' hidden'}>${esc(weatherText)}</span></p>
+        <h1>${esc(fmtDate(t, { weekday: 'long', month: 'long', day: 'numeric' }))}</h1>
+        <p class="muted"><span class="shift-indicator"></span><strong>${esc(currentShift())} shift</strong> <span class="desk-label">${esc($('#property-name')?.textContent || '')} front desk</span><span class="weather" id="weather"${weatherText ? '' : ' hidden'}>${esc(weatherText)}</span></p>
       </div>
       <div class="actions">
         <button type="button" class="btn btn-primary" data-action="new-log">+ Shift log</button>
         <button type="button" class="btn" data-action="new-fu">+ Follow-up</button>
-        <button type="button" class="btn" data-action="shift-note">Generate shift note</button>
+        <button type="button" class="btn" data-action="shift-note">Shift note</button>
       </div>
     </div>
     <div class="team-filter" role="group" aria-label="Show actionable items for">
-      <span class="muted">Actionable items for:</span>
       <div class="segmented"><span class="seg-thumb" aria-hidden="true"></span>${teamButtons}</div>
     </div>
     </div>
 
-    ${quickAccessHtml()}
 
     <div class="overview-main">
     ${quickLogHtml()}
-    <div class="stats">
-      <a class="stat" href="#logs"><span class="stat-value">${todaysLogs.length}</span><span class="stat-label">Logs today</span></a>
-      ${stat('Open follow-ups', active.length, { status: 'active', owner: team })}
-      ${stat('Overdue', overdue.length, { status: 'overdue', owner: team }, overdue.length ? 'tone-danger' : '')}
-      ${stat('Due today', dueToday.length, { status: 'today', owner: team }, dueToday.length ? 'tone-warn' : '')}
-      ${stat('High priority', highCount, { status: 'active', priority: 'High', owner: team })}
-    </div>
-
     <div class="overview-grid">
       <div class="col">
+        ${section('Needs attention', overdue.length + dueToday.length + high.length,
+          list([...overdue, ...dueToday, ...high], 'You’re all caught up. Nothing needs attention.'),
+          '<a href="#followups" class="small-link">View all</a>')}
         ${section("Today's shift activity", todaysSorted.length,
           todaysSorted.length ? `<div class="logs compact">${todaysSorted.map((l) => logItem(l)).join('')}</div>` : emptyState('No shift logs yet today.'),
           '<a href="#logs" class="small-link">View all</a>')}
       </div>
       <div class="col">
         ${todoSection()}
-        ${section('Important notices', state.notices.length, `
+        ${section('Notices for the team', state.notices.length, `
           ${state.notices.length ? `<ul class="notices">${state.notices.map((n) => `
             <li><span>${esc(n.text)}</span>
               <button type="button" class="btn btn-sm btn-ghost" data-action="del-notice" data-id="${n.id}" aria-label="Dismiss notice: ${esc(n.text)}">Dismiss</button></li>`).join('')}</ul>` : emptyState('No notices.')}
@@ -677,15 +670,13 @@ function viewOverview() {
             <input id="notice-input" name="text" placeholder="Add a notice for the team…" autocomplete="off">
             <button type="submit" class="btn btn-sm">Add</button>
           </form>`)}
-        ${section('Overdue', overdue.length, list(overdue, 'Nothing overdue. 🎉'))}
-        ${section('Due today', dueToday.length, list(dueToday, 'Nothing due today.'))}
-        ${section('High priority', high.length, list(high, 'No other high-priority items.'))}
         ${section('Coming up this week', upcoming.length, list(upcoming, 'Nothing else scheduled in the next 7 days.'))}
         ${section('Quick links', pinned.length,
           pinned.length ? `<ul class="quick-links">${pinned.map(resourceLink).join('')}</ul>` : emptyState('Pin resources on the Resources tab to show them here.'),
           '<a href="#resources" class="small-link">All resources</a>')}
       </div>
     </div>
+    <details class="dashboard-access"><summary>Quick access & calendar</summary>${quickAccessHtml()}</details>
     </div>
   </div>`;
 }
@@ -835,7 +826,7 @@ function viewLogs() {
       <div><h1>Shift log</h1><p class="muted">Unit or name, action taken, pending action, and date.</p></div>
       <div class="actions">
         <button type="button" class="btn btn-primary" data-action="new-log">+ Shift log</button>
-        <button type="button" class="btn" data-action="shift-note">Generate shift note</button>
+        <button type="button" class="btn" data-action="shift-note">Shift note</button>
       </div>
     </div>
 
@@ -2223,12 +2214,11 @@ function quickLogHtml() {
       <label for="quick-log-input"><strong>Quick log</strong></label>
       <div class="inline-form">
         <div class="quick-log-field">
-          <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="Type a note, e.g. white rose on site for cleaning" autocomplete="off"
+          <input id="quick-log-input" name="text" data-focus-key="quick-log" value="${esc(ui.quick.text)}" placeholder="What happened?" autocomplete="off"
             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="quick-log-picks">
           <ul id="quick-log-picks" class="quick-log-picks" role="listbox" aria-label="Suggestions" hidden></ul>
         </div>
-        ${ui.quick.review ? '' : `<button type="submit" class="btn btn-sm">Add</button>
-        <button type="button" class="btn btn-sm btn-ghost" data-action="quick-tidy">Tidy with Claude</button>`}
+        ${ui.quick.review ? '' : `<button type="submit" class="btn btn-primary quick-save">Save</button>`}
       </div>
       ${ui.quick.review ? `
       <label for="quick-log-review" class="muted small">Claude's version. Edit it if needed, then press Enter to save.</label>
@@ -2237,6 +2227,8 @@ function quickLogHtml() {
         <button type="submit" class="btn btn-sm btn-primary">Save</button>
         <button type="button" class="btn btn-sm btn-ghost" data-action="quick-use-typed">Use my wording</button>
       </div>` : ''}
+      <details class="quick-options"${ui.quick.fu.on || ui.quick.review ? ' open' : ''}><summary>More options</summary>
+      <button type="button" class="btn btn-sm btn-ghost" data-action="quick-tidy">Tidy with Claude</button>
       <div class="quick-log-dest">
         <label for="quick-log-dest" class="muted small">Goes to</label>
         <select id="quick-log-dest" aria-describedby="quick-log-hint">
@@ -2247,6 +2239,7 @@ function quickLogHtml() {
         <label class="check quick-log-fu-toggle"><input type="checkbox" name="fuOn"${ui.quick.fu.on ? ' checked' : ''}> Schedule a follow-up</label>
       </div>
       ${ui.quick.fu.on ? quickFollowupHtml() : ''}
+      </details>
     </form>`;
 }
 
@@ -2353,6 +2346,7 @@ function saveQuickAsTyped(form) {
   if (!dest) {
     render();
     toast('Choose where this note goes.', 'error');
+    $('#quick-log-dest').closest('details').open = true;
     return $('#quick-log-dest').focus();
   }
   return saveQuickLog(form, dest, quickFields(dest, text, occupants), false);
