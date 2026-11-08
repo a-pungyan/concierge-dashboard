@@ -615,6 +615,8 @@ main, main[data-view="overview"] { max-width: 1328px; padding: 28px 24px 72px; }
 .overview-head .actions .btn { border-radius: 999px; }
 .overview-head .actions [data-action="new-log"], .overview-head .actions [data-action="new-fu"] { display: none; }
 .team-filter { margin-bottom: 18px; }
+.overview-head { padding-inline: 24px; }
+.overview-head .team-filter { margin-left: -14px; }
 .segmented { gap: 4px; }
 .seg-thumb { display: none; }
 .seg { font-size: 16px; border-radius: 0; padding: 10px 14px; border-bottom: 2px solid transparent; }
@@ -668,6 +670,8 @@ input, textarea { caret-color: #006ee6; }
   .page-head p { flex-wrap: wrap; font-size: 13px; }
   .desk-label { margin-left: 0; }
   .seg { font-size: 14px; padding-inline: 8px; }
+  .overview-head { padding-inline: 18px; }
+  .overview-head .team-filter { margin-left: -8px; }
   .card, .quick-log { padding: 18px; }
   #quick-log-input { font-size: 17px; }
   .quick-save { min-width: 64px; font-size: 16px; padding-inline: 12px; }
