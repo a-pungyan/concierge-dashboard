@@ -73,3 +73,9 @@ npx supabase functions deploy quick-log-ai --project-ref yodrtjrweyrnwnsqrcom
 - `supabase/functions/quick-log-ai/` is the server function that calls Claude for the Quick log.
 - `data.js` contains the options lists, fictional sample data and the test-record generator.
 - `app.js` contains storage, rendering, forms, search and the shift note generator.
+
+### Resident upload screen
+
+Dashboard admins can open **Data → Import residents**, select one or more `.xlsx`, `.xls`, or `.csv` reports, preview the cleaned list, and confirm replacement. Include current, future, and notice residents together when appropriate. The first worksheet of each workbook is read. Files are parsed in the browser using the [SheetJS standalone reader](https://docs.sheetjs.com/docs/getting-started/installation/standalone/); only unit, first name, last name and relationship are sent to Supabase. The preview removes duplicate residents and flags a drop below half the loaded list.
+
+One-time database setup: run `supabase/migrations/202611070001_resident_upload.sql` in the project's Supabase SQL editor. It creates the `import_residents` RPC, restricted to users in `app_admins`. Replacement is transactional: an insert failure rolls back deletion of the previous residents. No service-role key is exposed to the browser. Until that migration is installed, previews work but importing shows a setup-required message. The existing Python importer remains available.

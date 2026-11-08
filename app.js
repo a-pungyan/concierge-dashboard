@@ -676,7 +676,6 @@ function viewOverview() {
           '<a href="#resources" class="small-link">All resources</a>')}
       </div>
     </div>
-    <details class="dashboard-access"><summary>Quick access & calendar</summary>${quickAccessHtml()}</details>
     </div>
   </div>`;
 }
@@ -719,8 +718,8 @@ function miniCalendarHtml() {
     </section>`;
 }
 
-function quickAccessHtml() {
-  return `<aside class="quick-access" aria-label="Quick access">${miniCalendarHtml()}${QUICK_ACCESS.map((group) => `
+function quickAccessHtml(includeCalendar = true) {
+  return `<aside class="quick-access" aria-label="Quick access">${includeCalendar ? miniCalendarHtml() : ''}${QUICK_ACCESS.map((group) => `
     <section class="quick-card">
       <h2>${esc(group.title)}</h2>
       <ul>${group.links.map((link) => {
@@ -1747,7 +1746,9 @@ $('#note-copy').addEventListener('click', async () => {
 
 const dataDialog = $('#data-dialog');
 
-function openDataDialog() {
+async function openDataDialog() {
+  const allowed = sb && await checkAdmin();
+  $('#resident-upload').hidden = !allowed;
   $('#data-stats').textContent =
     `Shared database: ${state.logs.length} shift logs · ${state.followups.length} follow-ups · ` +
     `${state.notices.length} notices · ${state.resources.length} resources.`;

@@ -15,7 +15,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true">CD</span>
+      <button class="brand-mark menu-toggle" id="menu-toggle" type="button" aria-label="Open navigation menu" aria-expanded="false" aria-controls="dashboard-menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div>
         <div class="brand-name">Concierge Dashboard</div>
         <div class="brand-sub" id="property-name">EL</div>
@@ -29,6 +29,8 @@
     <span class="account-email muted small" id="account-email"></span>
     <button class="btn btn-ghost" id="signout-btn" type="button" hidden>Sign out</button>
   </header>
+
+  <nav id="dashboard-menu" class="dashboard-menu" aria-label="Quick access" hidden></nav>
 
   <nav class="tabs" aria-label="Main">
     <a href="#overview" data-view="overview">Overview</a>
@@ -186,6 +188,19 @@
     <div class="dialog-body">
       <h2 id="data-dialog-title">Data &amp; storage</h2>
       <p class="muted">Shift logs, follow-ups, notices and resources are saved in the shared Supabase database. Only your pinned resources are saved in this browser.</p>
+      <section id="resident-upload" class="resident-upload" hidden>
+        <h3>Import residents</h3>
+        <p class="muted small">Upload your current resident report, plus future and notice reports if needed. Only unit, name and relationship are imported. This replaces the shared resident list for everyone.</p>
+        <label>Resident reports (.xlsx, .xls or .csv)<input id="resident-files" type="file" accept=".xlsx,.xls,.csv" multiple></label>
+        <button type="button" class="btn" id="resident-preview-btn">Preview import</button>
+        <p id="resident-upload-status" role="status" class="small"></p>
+        <div id="resident-upload-preview" hidden>
+          <div class="resident-preview-table"><table><thead><tr><th>Unit</th><th>Name</th><th>Relationship</th></tr></thead><tbody id="resident-preview-rows"></tbody></table></div>
+          <p class="small muted">Showing the first 50 residents.</p>
+          <label class="check"><input type="checkbox" id="resident-replace-confirm"> I have included the complete list and want to replace the current residents.</label>
+          <button type="button" class="btn btn-primary" id="resident-import-btn" disabled>Replace resident list</button>
+        </div>
+      </section>
       <p id="data-stats" class="muted"></p>
       <div class="stack">
         <button type="button" class="btn" id="export-btn">Export backup (JSON)</button>
@@ -238,5 +253,7 @@
   <script src="quick-entry.js"></script>
   <script src="app.js"></script>
   <script src="sticky-note.js"></script>
+  <script src="dashboard-menu.js"></script>
+  <script src="resident-import.js"></script>
 </body>
 </html>
