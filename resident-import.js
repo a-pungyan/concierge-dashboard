@@ -121,6 +121,7 @@ function cleanResidentRows(raw) {
       const { data, error } = await sb.rpc('import_residents', { residents: pending });
       if (error) {
         if (error.code === 'PGRST202') throw new Error('The upload screen is ready, but database setup is still required. Run the resident-upload SQL migration in Supabase first.');
+        if (/DELETE requires a WHERE clause/i.test(error.message)) throw new Error('The database import function needs the updated SQL migration (202611090001_fix_resident_upload.sql). Your existing resident list has not changed.');
         throw new Error(error.message);
       }
       reset(); files.value = '';

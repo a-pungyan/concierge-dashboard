@@ -24,7 +24,7 @@ begin
       or length(unit) > 100 or length(first_name) > 200 or length(last_name) > 200 or length(tenant_category) > 200
   ) then raise exception 'Every resident needs a unit and a name within the supported length.'; end if;
   lock table public.occupant_report in share row exclusive mode;
-  delete from public.occupant_report;
+  delete from public.occupant_report where id is not null;
   insert into public.occupant_report (unit, first_name, last_name, tenant_category)
   select distinct upper(trim(unit)), nullif(trim(first_name), ''), nullif(trim(last_name), ''), nullif(trim(tenant_category), '')
   from jsonb_to_recordset(residents) as r(unit text, first_name text, last_name text, tenant_category text);
