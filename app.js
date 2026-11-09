@@ -5,7 +5,7 @@
    Records persist in localStorage (this browser only).
    ============================================================ */
 
-const STORAGE_KEY = 'concierge-dashboard:v1';
+const STORAGE_KEY = 'concierge-dashboard:workspace-2:v1';
 const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1785,6 +1785,9 @@ function authSetupError() {
 }
 
 function showLogin() {
+  $('#property-name').textContent = '';
+  SHIFT_NOTE.property = 'Property';
+  SHIFT_NOTE.buildings = ['Property'];
   document.body.classList.add('signed-out');
   $('#account-email').textContent = '';
   $('#signout-btn').hidden = true;
@@ -1810,6 +1813,16 @@ async function refreshDisplayName() {
   render();
 }
 
+async function loadPropertySettings(userId) {
+  const { data, error } = await sb.from('property_settings').select('name, buildings').eq('id', 1).maybeSingle();
+  if (currentUser?.id !== userId || document.body.classList.contains('signed-out')) return;
+  if (error || !data) return;
+  SHIFT_NOTE.property = data.name || 'Property';
+  SHIFT_NOTE.buildings = Array.isArray(data.buildings) && data.buildings.length ? data.buildings : [SHIFT_NOTE.property];
+  $('#property-name').textContent = data.name || '';
+  if (!document.querySelector('dialog[open]')) render();
+}
+
 function onSignedIn(session) {
   document.body.classList.remove('signed-out');
   if (loginDialog.open) loginDialog.close();
@@ -1817,6 +1830,7 @@ function onSignedIn(session) {
   $('#signout-btn').hidden = false;
   currentUser = { id: session.user.id, email: session.user.email || '', name: displayName(session.user) };
   refreshDisplayName();
+  loadPropertySettings(session.user.id);
   loadOccupants();
   loadCloud();
   loadResources();

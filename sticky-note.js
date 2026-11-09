@@ -2,7 +2,7 @@
   const toggle = document.getElementById('sticky-toggle');
   const note = document.getElementById('scratch-note');
   const text = document.getElementById('scratch-text');
-  const key = 'concierge-personal-sticky-note';
+  const key = 'concierge-personal-sticky-note:workspace-2';
   const handle = note.querySelector('header');
   let drag = null;
   function place(left, top) {

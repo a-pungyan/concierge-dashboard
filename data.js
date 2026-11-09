@@ -3,8 +3,8 @@
 
 /* Shift note template settings. */
 const SHIFT_NOTE = {
-  property: 'Elm–Ledbury',
-  buildings: ['Elm', 'Ledbury'], // asked for when generating a note; used in the opening line
+  property: 'Property',
+  buildings: ['Property'], // asked for when generating a note; used in the opening line
 };
 
 const OPTIONS = {
@@ -28,7 +28,7 @@ const QUICK_ACCESS = [
       { name: 'Rise', url: '' },
       { name: 'LuxerOne', url: '' },
       { name: 'Sharepoint', url: '' },
-      { name: '88Q Credentials', url: '' },
+      { name: 'Credentials', url: '' },
       { name: 'SP+ Parking', url: '' },
     ],
   },
