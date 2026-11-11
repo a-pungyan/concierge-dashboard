@@ -46,10 +46,12 @@ const EntryNotice = (() => {
 
 (() => {
   const e = EntryNotice.escape;
-  const timeOptions = '<option value="">Choose time…</option>' + Array.from({ length: 17 }, (_, index) => {
-    const value = `${String(9 + Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`;
-    return `<option value="${value}">${EntryNotice.time(value)}</option>`;
-  }).join('');
+  const timeValues = Array.from({ length: 17 }, (_, index) =>
+    `${String(9 + Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`);
+  const minuteOfDay = value => { const [hours, minutes] = value.split(':').map(Number); return hours * 60 + minutes; };
+  const optionsFor = values => '<option value="">Choose time…</option>' + values.map(value =>
+    `<option value="${value}">${EntryNotice.time(value)}</option>`).join('');
+  const timeOptions = optionsFor(timeValues.slice(0, -1));
   const dialog = document.createElement('dialog');
   dialog.id = 'entry-notice-dialog'; dialog.className = 'entry-notice-dialog';
   dialog.setAttribute('aria-labelledby', 'entry-notice-title');
@@ -65,7 +67,8 @@ const EntryNotice = (() => {
       <section class="entry-fields" aria-labelledby="entry-details-heading"><h3 id="entry-details-heading">Entry details</h3>
         <div class="grid-2"><label>Property name<input name="property" maxlength="120" required></label><label>Date of notice<input type="date" name="noticeDate" required></label></div>
         <label>Entry date<input type="date" name="entryDate" required></label>
-        <div class="grid-2"><label>From<select name="startTime" required>${timeOptions}</select></label><label>Until<select name="endTime" required>${timeOptions}</select></label></div>
+        <div class="grid-2"><label>From<select name="startTime" required>${timeOptions}</select></label><label>Until<select name="endTime" required disabled aria-describedby="entry-time-hint"><option value="">Choose a start time first</option></select></label></div>
+        <p id="entry-time-hint" class="muted small">Up to 4 hours, between 9 AM and 5 PM.</p>
         <label>Reason for entry<textarea name="reason" rows="2" maxlength="1500" required></textarea></label>
         <label>Company entering<input name="company" maxlength="200" required></label>
         <label>Sender name<input name="sender" maxlength="200" required></label>
@@ -84,6 +87,15 @@ const EntryNotice = (() => {
   let people = [], selected = new Set(), edits = new Map(), reviewed = null, owner = null, frame = null;
   const fields = form.elements;
   const defaults = typeof ENTRY_NOTICE_DEFAULTS === 'undefined' ? {} : ENTRY_NOTICE_DEFAULTS;
+  function updateEndTimes() {
+    const start = fields.startTime.value;
+    const previous = fields.endTime.value;
+    const allowed = start ? timeValues.filter(value => value > start && minuteOfDay(value) - minuteOfDay(start) <= 240) : [];
+    fields.endTime.innerHTML = start ? optionsFor(allowed) : '<option value="">Choose a start time first</option>';
+    fields.endTime.disabled = !start;
+    fields.endTime.value = allowed.includes(previous) ? previous : '';
+  }
+  fields.startTime.addEventListener('change', () => { updateEndTimes(); invalidate(); });
   function invalidate() {
     reviewed = null; find('entry-preview').hidden = true; find('entry-preview').replaceChildren();
     find('entry-print').disabled = find('entry-copy').disabled = true;
@@ -113,7 +125,7 @@ const EntryNotice = (() => {
     if (document.body.classList.contains('signed-out') || !currentUser) return;
     if (dialog.open) return;
     owner = currentUser.id;
-    form.reset(); invalidate(); loadPeople();
+    form.reset(); updateEndTimes(); invalidate(); loadPeople();
     fields.property.value = SHIFT_NOTE.property === 'Property' ? '' : SHIFT_NOTE.property;
     fields.noticeDate.value = today(); fields.sender.value = currentUser.name || '';
     find('entry-address-options').innerHTML = (defaults.addresses || []).map(address => `<option value="${e(address)}"></option>`).join('');
@@ -159,6 +171,7 @@ const EntryNotice = (() => {
   form.addEventListener('input', event => {
     if (event.target.id === 'entry-resident-search') return;
     invalidate();
+    if (event.target === fields.startTime) updateEndTimes();
     const input = event.target;
     if (input.dataset.recipientField) {
       const edit = edits.get(input.dataset.unit) || {};
@@ -175,6 +188,8 @@ const EntryNotice = (() => {
     const values = Object.fromEntries(['property','noticeDate','entryDate','startTime','endTime','reason','company','sender'].map(name => [name, fields[name].value.trim()]));
     if (['property','reason','company','sender'].some(name => !values[name])) return showError('Complete the entry details; spaces alone cannot be used.');
     if (values.noticeDate > values.entryDate) return showError('The date of notice cannot be after the entry date.');
+    if (!timeValues.slice(0, -1).includes(values.startTime) || !timeValues.includes(values.endTime)) return showError('Choose entry times between 9 AM and 5 PM in half-hour intervals.');
+    if (minuteOfDay(values.endTime) - minuteOfDay(values.startTime) > 240) return showError('The entry window cannot exceed 4 hours.');
     if (values.endTime <= values.startTime) return showError('The end time must be later than the start time.');
     const recipients = groups().map(group => ({ ...group, names: (edits.get(group.unit)?.names ?? group.names).trim(), address: (edits.get(group.unit)?.address ?? EntryNotice.addressFor(group.unit, defaults)).trim() }));
     if (recipients.some(recipient => !recipient.names || !recipient.address)) return showError('Every unit needs tenant names and a complete address.');
