@@ -41,11 +41,15 @@ const EntryNotice = (() => {
     return `<article class="entry-paper">${paragraphs(values, recipient).map((p, i) => i === 0 ? `<h1>${escape(p)}</h1>` : `<p class="entry-line-${i}">${escape(p)}</p>`).join('')}</article>`;
   }
   const printCSS = `@page { size: letter; margin: 1in; } body { margin: 0; background: #fff; color: #000; } .entry-paper { font: 12pt/1.2 "Times New Roman", serif; overflow-wrap: anywhere; break-after: page; } .entry-paper:last-child { break-after: auto; } .entry-paper h1 { font: bold 14pt/1.2 "Times New Roman", serif; text-align: center; margin: 0; } .entry-paper p { margin: 0; white-space: pre-wrap; } .entry-paper .entry-line-1 { text-align: center; font-size: 14pt; margin-bottom: 24pt; } .entry-paper .entry-line-5, .entry-paper .entry-line-6, .entry-paper .entry-line-10, .entry-paper .entry-line-11, .entry-paper .entry-line-12 { margin-top: 12pt; }`;
-  return { escape, addressFor, group, paragraphs, html, printCSS };
+  return { escape, addressFor, group, paragraphs, html, printCSS, time };
 })();
 
 (() => {
   const e = EntryNotice.escape;
+  const timeOptions = '<option value="">Choose time…</option>' + Array.from({ length: 48 }, (_, index) => {
+    const value = `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`;
+    return `<option value="${value}">${EntryNotice.time(value)}</option>`;
+  }).join('');
   const dialog = document.createElement('dialog');
   dialog.id = 'entry-notice-dialog'; dialog.className = 'entry-notice-dialog';
   dialog.setAttribute('aria-labelledby', 'entry-notice-title');
@@ -61,7 +65,7 @@ const EntryNotice = (() => {
       <section class="entry-fields" aria-labelledby="entry-details-heading"><h3 id="entry-details-heading">Entry details</h3>
         <div class="grid-2"><label>Property name<input name="property" maxlength="120" required></label><label>Date of notice<input type="date" name="noticeDate" required></label></div>
         <label>Entry date<input type="date" name="entryDate" required></label>
-        <div class="grid-2"><label>From<input type="time" name="startTime" required></label><label>Until<input type="time" name="endTime" required></label></div>
+        <div class="grid-2"><label>From<select name="startTime" required>${timeOptions}</select></label><label>Until<select name="endTime" required>${timeOptions}</select></label></div>
         <label>Reason for entry<textarea name="reason" rows="2" maxlength="1500" required></textarea></label>
         <label>Company entering<input name="company" maxlength="200" required></label>
         <label>Sender name<input name="sender" maxlength="200" required></label>
