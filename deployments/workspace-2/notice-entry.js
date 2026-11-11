@@ -46,8 +46,8 @@ const EntryNotice = (() => {
 
 (() => {
   const e = EntryNotice.escape;
-  const timeOptions = '<option value="">Choose time…</option>' + Array.from({ length: 48 }, (_, index) => {
-    const value = `${String(Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`;
+  const timeOptions = '<option value="">Choose time…</option>' + Array.from({ length: 17 }, (_, index) => {
+    const value = `${String(9 + Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`;
     return `<option value="${value}">${EntryNotice.time(value)}</option>`;
   }).join('');
   const dialog = document.createElement('dialog');
