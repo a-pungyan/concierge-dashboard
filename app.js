@@ -640,6 +640,7 @@ function viewOverview() {
         <button type="button" class="btn btn-primary" data-action="new-log">+ Shift log</button>
         <button type="button" class="btn" data-action="new-fu">+ Follow-up</button>
         <button type="button" class="btn" data-action="shift-note">Shift note</button>
+        <button type="button" class="btn" data-notice-open>Notice of Entry</button>
       </div>
     </div>
     <div class="team-filter" role="group" aria-label="Show actionable items for">
@@ -826,6 +827,7 @@ function viewLogs() {
       <div class="actions">
         <button type="button" class="btn btn-primary" data-action="new-log">+ Shift log</button>
         <button type="button" class="btn" data-action="shift-note">Shift note</button>
+        <button type="button" class="btn" data-notice-open>Notice of Entry</button>
       </div>
     </div>
 
@@ -1011,6 +1013,7 @@ function viewSearch() {
       <li>
         <div class="item-main"><strong>${hl(o.unit, ts)}</strong> — ${hl(occName(o), ts)}
           ${o.tenant_category ? `<span class="muted small">${hl(o.tenant_category, ts)}</span>` : ''}</div>
+        <button type="button" class="btn btn-sm" data-notice-open data-notice-resident="${occupants.indexOf(o)}">Notice of Entry</button>
         <button type="button" class="btn btn-sm" data-action="new-log-for" data-unit="${esc(occLabel(o))}">+ Log</button>
         <button type="button" class="btn btn-sm" data-action="new-fu-for" data-unit="${esc(occLabel(o))}">+ Follow-up</button>
       </li>`).join('')}</ul>${people.length > LIMIT ? `<p class="muted small">Showing first ${LIMIT}. Type more of the unit or name to narrow it down.</p>` : ''}`) : ''}

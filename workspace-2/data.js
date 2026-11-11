@@ -258,3 +258,6 @@ function dayOffset(n) {
   d.setDate(d.getDate() + n);
   return isoDate(d);
 }
+
+/* Defaults from the supplied Notice of Entry form. Confirm the address for each unit. */
+const ENTRY_NOTICE_DEFAULTS = { contact: '', addresses: [] };

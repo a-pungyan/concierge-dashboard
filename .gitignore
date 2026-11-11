@@ -4,3 +4,6 @@ node_modules/
 *.xlsx
 *.xls
 *.csv
+
+# Local reference form; not needed by the published dashboard.
+/NOTICE OF ENTRY.docx

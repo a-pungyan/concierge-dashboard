@@ -79,3 +79,11 @@ npx supabase functions deploy quick-log-ai --project-ref yodrtjrweyrnwnsqrcom
 Dashboard admins can open **Data → Import residents**, select one or more `.xlsx`, `.xls`, or `.csv` reports, preview the cleaned list, and confirm replacement. Include current, future, and notice residents together when appropriate. The first worksheet of each workbook is read. Files are parsed in the browser using the [SheetJS standalone reader](https://docs.sheetjs.com/docs/getting-started/installation/standalone/); only unit, first name, last name and relationship are sent to Supabase. The preview removes duplicate residents and flags a drop below half the loaded list.
 
 One-time database setup: run `supabase/migrations/202611070001_resident_upload.sql` in the project's Supabase SQL editor. It creates the `import_residents` RPC, restricted to users in `app_admins`. Replacement is transactional: an insert failure rolls back deletion of the previous residents. No service-role key is exposed to the browser. Until that migration is installed, previews work but importing shows a setup-required message. The existing Python importer remains available.
+
+## Notice of Entry
+
+Available in both dashboards from the overview, the hamburger menu, or a resident search result. Select the intended leaseholders, fill in the common entry details, and review the names and rental address for each unit. Preview produces one notice per unit using the wording of the supplied form. The fixed example deadline is replaced with the selected last entry date (or the single entry date). Company, property, contact and sender are editable; the second dashboard has no first-property contact defaults.
+
+Use **Print / Save PDF** to open the browser's print dialog, or **Copy text** to prepare an email. For the clean paper layout, leave browser print headers/footers off. Notices are not emailed automatically, stored in the database, or sent to Claude. Changes invalidate the preview before printing, and closing/signing out clears the notice draft. The builder fills the supplied template; staff still review recipient names, addresses, wording and dates before issuing it.
+
+Implementation: `notice-entry.js` and `notice-entry.css`, mirrored in `workspace-2/`. No SQL setup is required. The original uploaded Word file is a reference, not a public download asset.

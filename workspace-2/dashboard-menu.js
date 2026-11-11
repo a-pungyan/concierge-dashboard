@@ -5,7 +5,7 @@
   let hoverOpened = false;
   function setOpen(open, restoreFocus = false) {
     clearTimeout(closeTimer);
-    if (open && menu.hidden) menu.innerHTML = quickAccessHtml(false);
+    if (open && menu.hidden) menu.innerHTML = quickAccessHtml(false) + '<hr><button type="button" data-notice-open>Notice of Entry</button>';
     if (!open) hoverOpened = false;
     menu.hidden = !open;
     toggle.setAttribute('aria-expanded', String(open));
