@@ -3,6 +3,10 @@ const EntryNotice = (() => {
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const date = value => new Date(`${value}T12:00:00`).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const time = value => { const [h, m] = value.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+  function addressFor(unit, defaults = {}) {
+    const prefix = String(unit || '').trim().charAt(0).toUpperCase();
+    return defaults.addressByPrefix?.[prefix] || '';
+  }
   function group(people) {
     const units = new Map();
     for (const person of people) {
@@ -24,12 +28,12 @@ const EntryNotice = (() => {
       `Rental unit: ${recipient.unit}, ${recipient.address}`,
       `Date of notice: ${date(values.noticeDate)}`,
       "Please accept this email as written notice that the landlord, or persons acting on the landlord's behalf, will enter your rental unit on the following dates and times:",
-      `Dates of entry: ${date(values.entryDate)}${values.endDate && values.endDate !== values.entryDate ? ` to ${date(values.endDate)}` : ''}`,
+      `Date of entry: ${date(values.entryDate)}`,
       `Time of entry: Between the hours of ${time(values.startTime)} - ${time(values.endTime)}`,
       `Reason for entry: ${values.reason}`,
       `Persons entering: Representatives of ${values.company} and ${values.property} staff.`,
-      `Multiple entries may be required within the period above. If any work remains after ${date(values.endDate || values.entryDate)}, a new notice of entry will be provided before any further entry.`,
-      `If you have any entry requests, such as pets that need to be secured or anything else we should know, please inform ${values.contact} or the concierge team before the date of entry.`,
+      `Multiple entries may be required within the period above. If any work remains after ${date(values.entryDate)}, a new notice of entry will be provided before any further entry.`,
+      `If you have any entry requests, such as pets that need to be secured or anything else we should know, please inform the concierge team before the date of entry.`,
       'Sincerely,', values.sender,
     ];
   }
@@ -37,7 +41,7 @@ const EntryNotice = (() => {
     return `<article class="entry-paper">${paragraphs(values, recipient).map((p, i) => i === 0 ? `<h1>${escape(p)}</h1>` : `<p class="entry-line-${i}">${escape(p)}</p>`).join('')}</article>`;
   }
   const printCSS = `@page { size: letter; margin: 1in; } body { margin: 0; background: #fff; color: #000; } .entry-paper { font: 12pt/1.2 "Times New Roman", serif; overflow-wrap: anywhere; break-after: page; } .entry-paper:last-child { break-after: auto; } .entry-paper h1 { font: bold 14pt/1.2 "Times New Roman", serif; text-align: center; margin: 0; } .entry-paper p { margin: 0; white-space: pre-wrap; } .entry-paper .entry-line-1 { text-align: center; font-size: 14pt; margin-bottom: 24pt; } .entry-paper .entry-line-5, .entry-paper .entry-line-6, .entry-paper .entry-line-10, .entry-paper .entry-line-11, .entry-paper .entry-line-12 { margin-top: 12pt; }`;
-  return { escape, group, paragraphs, html, printCSS };
+  return { escape, addressFor, group, paragraphs, html, printCSS };
 })();
 
 (() => {
@@ -55,14 +59,14 @@ const EntryNotice = (() => {
         <button type="button" class="btn btn-sm btn-ghost" id="entry-reload-residents">Refresh resident list</button>
       </section>
       <section class="entry-fields" aria-labelledby="entry-details-heading"><h3 id="entry-details-heading">Entry details</h3>
-        <div class="grid-2"><label>Property name<input name="property" maxlength="120" required></label><label>Date of notice<input type="date" name="noticeDate" required></label>
-        <label>Entry date<input type="date" name="entryDate" required></label><label>Last entry date (optional)<input type="date" name="endDate"></label>
-        <label>From<input type="time" name="startTime" required></label><label>Until<input type="time" name="endTime" required></label></div>
+        <div class="grid-2"><label>Property name<input name="property" maxlength="120" required></label><label>Date of notice<input type="date" name="noticeDate" required></label></div>
+        <label>Entry date<input type="date" name="entryDate" required></label>
+        <div class="grid-2"><label>From<input type="time" name="startTime" required></label><label>Until<input type="time" name="endTime" required></label></div>
         <label>Reason for entry<textarea name="reason" rows="2" maxlength="1500" required></textarea></label>
         <label>Company entering<input name="company" maxlength="200" required></label>
-        <div class="grid-2"><label>Contact email or phone<input name="contact" maxlength="200" required></label><label>Sender name<input name="sender" maxlength="200" required></label></div>
-        <label>Rental address for selected units<input name="address" list="entry-address-options" maxlength="250" placeholder="Street address, city, province" required></label><datalist id="entry-address-options"></datalist>
-        <p class="muted small">You can override the address and edit the tenant names for each unit below. Check the names against the lease.</p>
+        <label>Sender name<input name="sender" maxlength="200" required></label>
+        <datalist id="entry-address-options"></datalist>
+        <p class="muted small">Review tenant names and addresses for the selected units below.</p>
         <div id="entry-recipients" class="entry-recipients"></div>
       </section>
     </div>
@@ -75,6 +79,7 @@ const EntryNotice = (() => {
   const form = dialog.querySelector('form'), find = id => dialog.querySelector(`#${id}`);
   let people = [], selected = new Set(), edits = new Map(), reviewed = null, owner = null, frame = null;
   const fields = form.elements;
+  const defaults = typeof ENTRY_NOTICE_DEFAULTS === 'undefined' ? {} : ENTRY_NOTICE_DEFAULTS;
   function invalidate() {
     reviewed = null; find('entry-preview').hidden = true; find('entry-preview').replaceChildren();
     find('entry-print').disabled = find('entry-copy').disabled = true;
@@ -95,7 +100,7 @@ const EntryNotice = (() => {
     const recipients = groups();
     find('entry-recipients').innerHTML = recipients.map(({ unit, names }) => {
       const edit = edits.get(unit) || {};
-      return `<fieldset class="entry-recipient"><legend>${e(unit)}</legend><label>Tenant names<input data-unit="${e(unit)}" data-recipient-field="names" maxlength="1000" required value="${e(edit.names ?? names)}"></label><label>Address override (optional)<input data-unit="${e(unit)}" data-recipient-field="address" maxlength="250" value="${e(edit.address || '')}" placeholder="Use the rental address above"></label></fieldset>`;
+      return `<fieldset class="entry-recipient"><legend>${e(unit)}</legend><label>Tenant names<input data-unit="${e(unit)}" data-recipient-field="names" maxlength="1000" required value="${e(edit.names ?? names)}"></label><label>Rental address<input data-unit="${e(unit)}" data-recipient-field="address" list="entry-address-options" maxlength="250" required value="${e(edit.address ?? EntryNotice.addressFor(unit, defaults))}" placeholder="Street address, city, province"></label></fieldset>`;
     }).join('');
   }
   function selectionChanged() { invalidate(); renderList(); renderRecipients(); }
@@ -107,8 +112,6 @@ const EntryNotice = (() => {
     form.reset(); invalidate(); loadPeople();
     fields.property.value = SHIFT_NOTE.property === 'Property' ? '' : SHIFT_NOTE.property;
     fields.noticeDate.value = today(); fields.sender.value = currentUser.name || '';
-    const defaults = typeof ENTRY_NOTICE_DEFAULTS === 'undefined' ? {} : ENTRY_NOTICE_DEFAULTS;
-    fields.contact.value = defaults.contact || '';
     find('entry-address-options').innerHTML = (defaults.addresses || []).map(address => `<option value="${e(address)}"></option>`).join('');
     find('entry-resident-search').value = '';
     if (Number.isInteger(personIndex) && people[personIndex]) selected.add(personIndex);
@@ -165,12 +168,11 @@ const EntryNotice = (() => {
     if (!selected.size) return showError('Select at least one resident.');
     if (groups().length > 100) return showError('Prepare up to 100 units at a time.');
     if (!form.reportValidity()) return;
-    const values = Object.fromEntries(['property','noticeDate','entryDate','endDate','startTime','endTime','reason','company','contact','sender','address'].map(name => [name, fields[name].value.trim()]));
-    if (['property','reason','company','contact','sender','address'].some(name => !values[name])) return showError('Complete the entry details; spaces alone cannot be used.');
-    if (values.endDate && values.endDate < values.entryDate) return showError('The last entry date must be on or after the first entry date.');
+    const values = Object.fromEntries(['property','noticeDate','entryDate','startTime','endTime','reason','company','sender'].map(name => [name, fields[name].value.trim()]));
+    if (['property','reason','company','sender'].some(name => !values[name])) return showError('Complete the entry details; spaces alone cannot be used.');
     if (values.noticeDate > values.entryDate) return showError('The date of notice cannot be after the entry date.');
     if (values.endTime <= values.startTime) return showError('The end time must be later than the start time.');
-    const recipients = groups().map(group => ({ ...group, names: (edits.get(group.unit)?.names ?? group.names).trim(), address: (edits.get(group.unit)?.address || values.address).trim() }));
+    const recipients = groups().map(group => ({ ...group, names: (edits.get(group.unit)?.names ?? group.names).trim(), address: (edits.get(group.unit)?.address ?? EntryNotice.addressFor(group.unit, defaults)).trim() }));
     if (recipients.some(recipient => !recipient.names || !recipient.address)) return showError('Every unit needs tenant names and a complete address.');
     reviewed = { values, recipients, owner };
     find('entry-preview').innerHTML = recipients.map(recipient => EntryNotice.html(values, recipient)).join('');

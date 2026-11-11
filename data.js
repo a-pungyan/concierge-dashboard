@@ -260,4 +260,4 @@ function dayOffset(n) {
 }
 
 /* Defaults from the supplied Notice of Entry form. Confirm the address for each unit. */
-const ENTRY_NOTICE_DEFAULTS = { contact: 'mail@elmledbury.ca', addresses: ['25 Dalhousie Street, Toronto, ON', '30 Mutual Street, Toronto, ON'] };
+const ENTRY_NOTICE_DEFAULTS = { addressByPrefix: { E: '30 Mutual Street, Toronto, ON', W: '25 Dalhousie Street, Toronto, ON' }, addresses: ['30 Mutual Street, Toronto, ON', '25 Dalhousie Street, Toronto, ON'] };

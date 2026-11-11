@@ -260,4 +260,4 @@ function dayOffset(n) {
 }
 
 /* Defaults from the supplied Notice of Entry form. Confirm the address for each unit. */
-const ENTRY_NOTICE_DEFAULTS = { contact: '', addresses: [] };
+const ENTRY_NOTICE_DEFAULTS = { addressByPrefix: {}, addresses: [] };

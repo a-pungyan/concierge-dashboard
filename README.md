@@ -82,7 +82,7 @@ One-time database setup: run `supabase/migrations/202611070001_resident_upload.s
 
 ## Notice of Entry
 
-Available in both dashboards from the overview, the hamburger menu, or a resident search result. Select the intended leaseholders, fill in the common entry details, and review the names and rental address for each unit. Preview produces one notice per unit using the wording of the supplied form. The fixed example deadline is replaced with the selected last entry date (or the single entry date). Company, property, contact and sender are editable; the second dashboard has no first-property contact defaults.
+Available in both dashboards from the overview, the hamburger menu, or a resident search result. Select the intended leaseholders, fill in the common entry details, and review the names and rental address for each unit. Preview produces one notice per unit using the wording of the supplied form. The fixed example deadline uses the single selected entry date. Company, property and sender are editable; contact requests refer to the concierge team. In the original dashboard, E units autofill 30 Mutual Street and W units autofill 25 Dalhousie Street (Toronto, ON). Other unit prefixes and the second property require an address per unit. Addresses remain editable.
 
 Use **Print / Save PDF** to open the browser's print dialog, or **Copy text** to prepare an email. For the clean paper layout, leave browser print headers/footers off. Notices are not emailed automatically, stored in the database, or sent to Claude. Changes invalidate the preview before printing, and closing/signing out clears the notice draft. The builder fills the supplied template; staff still review recipient names, addresses, wording and dates before issuing it.
 
