@@ -87,3 +87,9 @@ Available in both dashboards from the overview, the hamburger menu, or a residen
 Use **Print / Save PDF** to open the browser's print dialog, or **Copy text** to prepare an email. For the clean paper layout, leave browser print headers/footers off. Notices are not emailed automatically, stored in the database, or sent to Claude. Changes invalidate the preview before printing, and closing/signing out clears the notice draft. The builder fills the supplied template; staff still review recipient names, addresses, wording and dates before issuing it.
 
 Implementation: `notice-entry.js` and `notice-entry.css`, mirrored in `workspace-2/`. No SQL setup is required. The original uploaded Word file is a reference, not a public download asset.
+
+## Screenshot to-dos
+
+Use **Add photo**, paste an image into the to-do input, or drop image files onto the to-do composer. An optional caption typed in the input is attached to the first image. Each image becomes a separate checkable to-do; select the thumbnail to open the full screenshot. A caption can be turned into a shift-log draft, but the screenshot itself is not copied into shift logs.
+
+Like text to-dos, screenshots are personal to this browser and property and disappear from the list on a new day. Image blobs use IndexedDB rather than localStorage and are never uploaded to Supabase or Claude. Old image blobs are purged when the dashboard next opens. Removing an item deletes its image. Clearing browser site data also removes these images. PNG, JPG, WebP and GIF are accepted, up to 10 MB per image, 10 images / 40 MB per batch. A failed image-storage or list save leaves the existing to-do list unchanged.

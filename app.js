@@ -2090,8 +2090,10 @@ function loadTodos() {
 function saveTodos(items) {
   try {
     localStorage.setItem(TODO_KEY, JSON.stringify({ date: today(), items }));
+    return true;
   } catch (_) {
     toast('Could not save the to-do list in this browser.', 'error');
+    return false;
   }
 }
 
@@ -2100,18 +2102,22 @@ function todoSection() {
   const left = todos.filter((t) => !t.done).length;
   return section('To-do', left, `
     ${todos.length ? `<ul class="todos">${todos.map((t) => `
-      <li class="${t.done ? 'done' : ''}">
-        <label class="check"><input type="checkbox" data-action="toggle-todo" data-id="${t.id}"${t.done ? ' checked' : ''}> <span>${esc(t.text)}</span></label>
+      <li class="${t.done ? 'done' : ''}${t.photoId ? ' todo-with-photo' : ''}">
+        <div class="todo-content"><label class="check"><input type="checkbox" data-action="toggle-todo" data-id="${t.id}"${t.done ? ' checked' : ''}> <span>${esc(t.text || 'Screenshot')}</span></label>
+        ${t.photoId ? `<button type="button" class="todo-photo-preview" data-todo-photo="${esc(t.photoId)}" aria-label="Open screenshot: ${esc(t.text || 'To-do')}"><img data-todo-photo-src="${esc(t.photoId)}" alt="${esc(t.text || 'Screenshot to-do')}" loading="lazy"><span class="todo-photo-status">Loading screenshot…</span></button>` : ''}</div>
         <span class="todo-actions">
-          <button type="button" class="btn btn-sm btn-ghost" data-action="todo-to-log" data-id="${t.id}" aria-label="Turn into shift log: ${esc(t.text)}">Log it</button>
-          <button type="button" class="btn btn-sm btn-ghost" data-action="del-todo" data-id="${t.id}" aria-label="Remove to-do: ${esc(t.text)}">Remove</button>
+          ${t.text ? `<button type="button" class="btn btn-sm btn-ghost" data-action="todo-to-log" data-id="${t.id}" aria-label="Turn into shift log: ${esc(t.text)}">Log it</button>` : ''}
+          <button type="button" class="btn btn-sm btn-ghost" data-action="del-todo" data-id="${t.id}"${t.photoId ? ` data-remove-todo-photo="${esc(t.photoId)}"` : ''} aria-label="Remove to-do: ${esc(t.text || 'Screenshot')}">Remove</button>
         </span></li>`).join('')}</ul>`
       : emptyState('Nothing on your list. It clears each day.')}
-    <form class="inline-form" data-form="todo">
+    <form class="inline-form todo-composer" data-form="todo" aria-describedby="todo-photo-hint">
       <label for="todo-input" class="sr-only">New to-do</label>
-      <input id="todo-input" name="text" placeholder="Add a to-do…" autocomplete="off">
+      <input id="todo-input" name="text" placeholder="Add a to-do or photo caption…" autocomplete="off">
       <button type="submit" class="btn btn-sm">Add</button>
-    </form>`);
+      <button type="button" class="btn btn-sm" data-add-todo-photo>Add photo</button>
+      <input class="sr-only" id="todo-photo-files" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple tabindex="-1" aria-label="Choose screenshots for your to-do list">
+    </form>
+    <p id="todo-photo-hint" class="muted small todo-photo-hint">Paste or drop a screenshot here, or choose Add photo. Photos stay in this browser and clear each day.</p>`);
 }
 
 /* The Quick log rules also tidy a to-do into a log draft. Without a match, the type is chosen as usual. */
@@ -2432,7 +2438,7 @@ function addTodo(form) {
   const input = form.elements.text;
   const text = input.value.trim();
   if (!text) return input.focus();
-  saveTodos([...loadTodos(), { id: crypto.randomUUID(), text, done: false }]);
+  if (!saveTodos([...loadTodos(), { id: crypto.randomUUID(), text, done: false }])) return;
   render();
   $('#todo-input')?.focus();
 }
